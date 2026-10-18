@@ -29,6 +29,16 @@ if [ ! -f "$DATA_DIR/config.php" ]; then
 	sed -i "s/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', true)/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', false)/" "$DATA_DIR/config.php"
 fi
 
+# Before a new Grocy version migrates the database, keep a full snapshot of the old state.
+# (Apache isn't running yet, so nothing can trigger the migrations before this.)
+version="$(php -r 'echo json_decode(file_get_contents("/var/www/html/version.json"))->Version;')"
+last_version="$(cat "$DATA_DIR/.grocy_plus_version" 2>/dev/null || true)"
+if [ -f "$DATA_DIR/grocy.db" ] && [ "$version" != "$last_version" ]; then
+	echo "[grocy+] Grocy ${last_version:-unknown} -> $version: snapshot before migrations"
+	grocy-backup --full "pre-upgrade-${last_version:-unknown}-to-$version"
+fi
+echo "$version" > "$DATA_DIR/.grocy_plus_version"
+
 # Always start with an empty view cache (also forces Grocy to re-check migrations)
 rm -rf "$DATA_DIR/viewcache/"*
 
@@ -51,5 +61,18 @@ echo "Listen ${PORT}" > /etc/apache2/ports.conf
 	done
 	echo "[grocy+] WARNING: Grocy did not answer on / within 120 s"
 ) &
+
+# Daily database snapshot at GROCY_BACKUP_HOUR (default 03, container TZ); GROCY_BACKUP_DAILY=false disables
+if [ "${GROCY_BACKUP_DAILY:-true}" = "true" ]; then
+	(
+		while true; do
+			now=$(date +%s)
+			next=$(date -d "today ${GROCY_BACKUP_HOUR:-03}:00" +%s)
+			[ "$next" -le "$now" ] && next=$(date -d "tomorrow ${GROCY_BACKUP_HOUR:-03}:00" +%s)
+			sleep $((next - now))
+			grocy-backup daily || echo "[grocy+] WARNING: daily backup failed"
+		done
+	) &
+fi
 
 exec "$@"

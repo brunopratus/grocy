@@ -129,6 +129,56 @@ or add the two services to an existing project. Both services deploy from the Gi
 6. Deploy. The log shows `setup done: {...}`: units, locations, stores, meal plan sections and
    userfields now exist in Grocy. `POST /setup` re-runs it anytime.
 
+## Getting the keys and secrets
+
+| Variable | Where it comes from | Cost |
+|---|---|---|
+| `GROCY_API_KEY` | Your Grocy (step 3 above) | free |
+| `ANTHROPIC_API_KEY` | Claude Console | pay per use |
+| `USDA_FDC_API_KEY` | data.gov sign-up | free |
+| `NTFY_TOPIC_URL` | You invent it | free |
+| `COMPANION_TOKEN` | You generate it | free |
+
+**Grocy API keys.** Log in to Grocy as the person the key is for → user menu (top right) →
+**Manage API keys** → **Add**. Copy the long key that appears. Make one for the companion (logged in as
+admin) and one per phone (logged in as that person), so each can be revoked alone. The phone apps can
+also create their own key when you log in with username and password.
+
+**Anthropic (Claude) API key.**
+1. Go to <https://console.anthropic.com> and sign up/log in (this is a different account area from the
+   Claude chat app, even with the same e-mail).
+2. **Settings → Billing**: add a card and buy credits (start with $5–10; see *Costs*). Optionally turn on
+   auto-reload with a low amount. Without credits the key exists but every request fails.
+3. **Settings → Limits**: set a monthly spend limit (e.g. $10) so a bug can never run up a bill.
+4. **API keys → Create key**, name it `grocy-plus`, copy it once (it's shown only once) into Railway as
+   `ANTHROPIC_API_KEY`. Optionally create a separate workspace `grocy-plus` first and make the key
+   there, so its usage and limit are separate from anything else.
+
+**USDA FoodData Central key.** Open <https://fdc.nal.usda.gov/api-key-signup>, enter name and e-mail;
+the key arrives by e-mail within minutes. Free, 1,000 requests/hour (far more than needed: it's only used
+when a new market product is created). `DEMO_KEY` works without signing up but is limited to about 30
+requests/hour and 50/day per IP, which can fail on busy days.
+
+**ntfy topic.** No account needed. Invent a long, random topic name, e.g. run `openssl rand -hex 8` or
+type random letters: `grocyplus-7f3a9c2e51d4`. Then `NTFY_TOPIC_URL=https://ntfy.sh/grocyplus-7f3a9c2e51d4`,
+and subscribe to exactly that topic in the ntfy app on both phones (server `ntfy.sh`). Anyone who knows
+the name can read or send messages, so don't make it guessable. Test it before deploying:
+`curl -d "Hello from Grocy+" https://ntfy.sh/<your-topic>`.
+
+**COMPANION_TOKEN.** A long random string that you and Raminta type once on the companion's login
+page (the phone then remembers it for a year). Generate with `openssl rand -hex 24`, or use a password
+manager's generator (32+ characters). Changing it logs both phones out.
+
+## Healthchecks
+
+After each deploy, Railway calls the healthcheck path and only switches traffic to the new version once
+it answers **HTTP 200** (old version stays live otherwise, so a broken build never replaces a working one).
+It is a deploy-time check, not ongoing monitoring.
+
+* `grocy`: `/login`, timeout 300 s. The Grocy login page needs no API key and only answers once Apache,
+  PHP and the database work. (`/api/...` can't be used: it returns 401 without a key.)
+* `companion`: `/health`, timeout 120 s; returns `{"ok": true}` without a token.
+
 ## Phone setup
 
 **ntfy (both phones):** install *ntfy* (App Store / Google Play) → subscribe to the topic from
@@ -179,35 +229,91 @@ PRs opened by `GITHUB_TOKEN` don't trigger other workflows; that's expected. If 
 secret `SYNC_TOKEN` (contents, pull requests, workflows: read/write) and the workflow uses it.
 
 ### Upgrading Grocy
-1. **Back up the Grocy volume first** (see Backups).
+1. Optional extra safety: Railway → `grocy` → Backups → **Backup now**.
 2. Merge the sync PR into `plus`.
-3. Railway rebuilds the `grocy` service; the entrypoint clears the view cache and requests `/`,
-   which runs Grocy's database migrations. Check the deploy log for `migrations done`.
+3. Railway rebuilds the `grocy` service. Before Apache starts, the entrypoint notices the new Grocy
+   version and writes a full snapshot (`backups/grocy-…-pre-upgrade-<old>-to-<new>.db.gz` plus
+   `files-….tgz`), then requests `/`, which runs Grocy's database migrations. Check the deploy log
+   for `snapshot before migrations` and `migrations done`.
 4. Read the upstream changelog in the PR for breaking API changes; the companion's CI runs on its
    own changes only, so open the companion once after an upgrade (or run `POST /setup`).
 
 ## Costs
 
 * **Railway:** two small services and two small volumes; typically a few USD/month on the Hobby plan.
-* **Claude API** (prices per million tokens: Sonnet 5.5 $2 in / $10 out, Haiku 5.5 $0.10 / $0.50):
+* **Claude API: separate, pay-as-you-go.** A Claude.ai Pro/Max subscription does **not** include API
+  usage; the API is billed through console.anthropic.com from prepaid credits you buy with a card
+  (each call deducts its cost; auto-reload and a monthly spend limit are optional). Prices per million
+  tokens: Sonnet 5.5 $2 in / $10 out, Haiku 5.5 $0.10 / $0.50.
   * label photo or due-date photo (Sonnet, images downscaled to 1568 px): typically about **1 cent**;
   * new market produce (2 Haiku calls) or new barcode product (1 Haiku call): **< 0.1 cent**;
   * weekly meal plan from a PDF (Sonnet, large input and output): roughly **10–30 cents**;
   * receipt photo: about 1–2 cents.
   A normal month is usually **$1–3**. Exact numbers: `GET /usage` (tokens and estimated cost per
-  task, logged per call).
+  task, logged per call), and the Console's Usage page.
 * Open Food Facts, USDA FDC and ntfy.sh are free.
 
 ## Backups
 
-* **Grocy volume** (`/var/www/html/data`): the database, photos and config. Use Railway's volume
-  backups (service → Volumes → Backups; schedule daily/weekly) and take a manual backup before every
-  upgrade. A portable copy: `railway ssh` into the service (or use Grocy's own UI) and copy
-  `data/grocy.db` + `data/storage/`; SQLite can be copied safely with
-  `sqlite3 data/grocy.db ".backup /tmp/grocy-backup.db"` if the tool is available, otherwise stop writes
-  first.
-* **Companion volume** (`/data`): history, Claude cost log, generated plans, receipt originals.
-  Losing it loses only history; Grocy holds all household data.
+Two layers protect the Grocy volume (`/var/www/html/data`: database, photos, config):
+
+**1. Railway volume backups (protect against losing the volume).** Railway → `grocy` service →
+**Backups** tab:
+* turn on the **Daily** schedule (kept 6 days) and **Weekly** (kept 1 month); Monthly (kept 3 months)
+  is cheap insurance too;
+* **Backup now** creates a manual one at any time (do one right after the first setup);
+* **Restore** stages a new volume from the backup, mounted where the old one was; review and deploy
+  the staged change. The old volume is kept, unmounted.
+* Backups belong to the volume: deleting ("wiping") the volume deletes its backups, so download a
+  copy now and then (below).
+
+**2. Snapshots inside the volume (protect against bad upgrades and mistakes).** Built into the image:
+* before every Grocy version change: full snapshot (database + `storage/` + `config.php`);
+* every day at 03:00 (`TZ`): database snapshot;
+* on demand: `railway ssh --service grocy` then `grocy-backup` (database) or
+  `grocy-backup --full` (with photos).
+
+Files go to `data/backups/` as `grocy-<date>-<label>.db.gz` (made with SQLite `VACUUM INTO`, which is
+consistent while Grocy is running) and `files-<date>-<label>.tgz`; the newest 14 of each are kept.
+Settings: `GROCY_BACKUP_DAILY=false` to turn the daily one off, `GROCY_BACKUP_HOUR=03`,
+`GROCY_BACKUP_KEEP=14`.
+
+**Off-site copy** (e.g. monthly, to your computer) with the [Railway CLI](https://docs.railway.com/guides/cli).
+I couldn't test the CLI from the build environment, so check the first copy opens (e.g. in
+[DB Browser for SQLite](https://sqlitebrowser.org/)):
+```bash
+railway link                       # pick the grocy-plus project
+railway ssh --service grocy        # opens a shell in the container, then:
+grocy-backup monthly
+base64 -w0 "$(ls -t /var/www/html/data/backups/grocy-*.db.gz | head -1)"; echo
+# copy the printed text into a file grocy.b64 on your computer, then exit and run:
+#   base64 -d grocy.b64 > grocy.db.gz && gunzip grocy.db.gz
+```
+
+**Restore a snapshot** (stops writes for a moment):
+```bash
+railway ssh --service grocy
+cd /var/www/html/data && ls -t backups/
+gunzip -c backups/grocy-<date>-<label>.db.gz > grocy.db.restore
+mv grocy.db grocy.db.before-restore && mv grocy.db.restore grocy.db && chown www-data: grocy.db
+# for a --full snapshot also: tar -xzf backups/files-<date>-<label>.tgz -C /var/www/html/data
+exit
+```
+Then restart the service in Railway.
+
+**Companion volume** (`/data`): history, Claude cost log, generated plans, receipt originals. Losing it
+loses only history (Grocy holds all household data); a weekly Railway backup is enough.
+
+## Nutrition data sources
+
+| Source | Used for | Notes |
+|---|---|---|
+| Open Food Facts | barcodes | Free, open. Coverage of Lithuanian-only products (barcodes starting `477`) is thin, so expect label photos for many local brands; international brands sold at Lidl/Maxima are usually present |
+| Label photo + Claude | anything with a nutrition table | Reads LT/LV/ET/PL/EN labels; the authoritative source for packaged food |
+| USDA FoodData Central | market produce, generic foods | Free API, Foundation/SR Legacy per 100 g |
+| Lithuanian national food composition database (SMLPC, *Maisto produktų sudėties ir energijos duomenų bazė*) | reference only | Official generic-food tables, linked from the Ministry of Health; web lookup only, no public API found, so not integrated |
+| Fineli (Finland, THL) | possible future source for generic foods | Open data under CC BY 4.0, Nordic foods close to Lithuanian ones; not integrated yet |
+| Retailer sites (Barbora/Maxima, Rimi e-shops) | – | Show nutrition on product pages but have no public API; scraping may break their terms, so not used |
 
 ## Roadmap
 

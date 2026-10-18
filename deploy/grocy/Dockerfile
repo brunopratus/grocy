@@ -42,7 +42,8 @@ COPY --from=frontend --chown=www-data:www-data /src/public/packages ./public/pac
 
 # Pristine data/ used to seed the Railway volume on first start
 RUN cp -a data /opt/grocy-data-pristine \
-	&& install -m 0755 deploy/grocy/entrypoint.sh /usr/local/bin/grocy-entrypoint
+	&& install -m 0755 deploy/grocy/entrypoint.sh /usr/local/bin/grocy-entrypoint \
+	&& install -m 0755 deploy/grocy/backup.sh /usr/local/bin/grocy-backup
 
 ENV PORT=8080 \
 	GROCY_CURRENCY=EUR \
