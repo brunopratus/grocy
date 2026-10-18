@@ -16,6 +16,7 @@ The phone UI is served at `/`. Project overview and Railway setup: [`../GROCY_PL
 | `CLAUDE_MODEL_CHEAP` | | `claude-haiku-5-5` | Translation, storage advice, USDA match picking |
 | `CLAUDE_FALLBACKS` | | `true` | Server-side refusal fallback (`fallbacks: "default"`) for non-Haiku calls |
 | `USDA_FDC_API_KEY` | | `DEMO_KEY` | Free key from <https://fdc.nal.usda.gov/api-key-signup> (DEMO_KEY is rate limited) |
+| `GENERIC_FOOD_SOURCES` | | `fineli,usda` | Generic-food databases for market produce, searched in parallel; Claude picks the best match |
 | `NTFY_TOPIC_URL` | | | e.g. `https://ntfy.sh/grocyplus-<random>`; daily alert is skipped when empty |
 | `TZ` | | `Europe/Vilnius` | Scheduler and dates |
 | `ALERT_HOUR` / `ALERT_DUE_DAYS` | | `8` / `3` | Daily alert time and "due within" window |
@@ -47,7 +48,7 @@ T="X-Companion-Token: $COMPANION_TOKEN"
 |---|---|---|---|
 | POST | `/products/barcode/{code}` | – | Existing Grocy product, else Open Food Facts → new product with nutrition userfields, pack-size conversion, barcode and picture. `status`: `existing` / `created` / `not_found` / `lookup_failed`; `needs_label_photo: true` means "photo of the nutrition table needed" |
 | POST | `/products/{id}/label-photo` | multipart `images` (1–2 files: nutrition table, then front/net weight), optional `barcode` | Claude reads name, brand, net quantity, nutrition per 100 g/ml (LT/LV/ET/PL/EN; per-portion-only labels are scaled), suggested storage location and shelf life after opening. Use `new` as `{id}` to create the product. The table photo is stored in the `label_photo` userfield, the front photo becomes the product picture |
-| POST | `/products/produce` | `{name, weight_g? , count?, price_eur?, store? = "Turgus", best_before?}` | Market produce without barcode. New products: Claude (cheap model) translates to a generic English food term and gives storage values, USDA FDC (Foundation/SR Legacy first) gives per-100 g nutrition, Claude picks the best match. Stock unit is g; `count` uses the typical piece weight. Adds stock with price and store |
+| POST | `/products/produce` | `{name, weight_g? , count?, price_eur?, store? = "Turgus", best_before?}` | Market produce without barcode. New products: Claude (cheap model) gives the generic English and Finnish food terms and storage values; Fineli (Finnish national database) and USDA FDC (Foundation/SR Legacy first) are searched in parallel and Claude picks the best per-100 g match, preferring Fineli. Stock unit is g; `count` uses the typical piece weight. Adds stock with price and store |
 | POST | `/stock/add` | `{product_id or barcode, amount, unit?, price_total?, store?, best_before?, location?}` | Converts to the stock unit (pack/piece via the pack size) and books it with unit price and shopping location, so Grocy's per-store price history works |
 | POST | `/ocr/due-date` | multipart `image` | `{date: "YYYY-MM-DD" | null, kind, raw_text, confidence}` |
 
@@ -64,6 +65,7 @@ T="X-Companion-Token: $COMPANION_TOKEN"
 |---|---|---|
 | GET | `/recipes/{id}/nutrition` | Ingredients × per-100 userfields → total and per serving, plus cost from Grocy fulfillment |
 | GET | `/reports/week?start=YYYY-MM-DD` | Meal plan cost and nutrition per day and per person, stock consumed, wasted (spoiled consumes) and inventory corrections. Default: this week's Monday |
+| GET | `/nutrition/search?q=carrot&fi=porkkana` | Generic-food candidates per 100 g from Fineli (THL, CC BY 4.0) and USDA, for checking values |
 | GET | `/usage?since=YYYY-MM-DD` | Claude tokens and estimated USD cost per task/model |
 
 ### Meal plan
@@ -121,7 +123,7 @@ GROCY_URL=http://localhost:8080 GROCY_API_KEY=... COMPANION_TOKEN=dev COMPANION_
 ```
 
 Tests mock Grocy (respx at HTTP level, plus an in-memory fake) and Claude; they cover unit
-conversion, the cook/open logic, nutrition math, the Claude wrapper, weighing and plan→Grocy mapping.
+conversion, Fineli/USDA lookups, the cook/open logic, nutrition math, the Claude wrapper, weighing and plan→Grocy mapping.
 
 | Module | |
 |---|---|

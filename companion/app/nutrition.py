@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -289,3 +289,99 @@ async def usda_search(http: httpx.AsyncClient, query: str, api_key: str, page_si
         if results:
             return results
     return results
+
+
+# --- Fineli (Finnish Food Composition Database, THL) ---------------------------------
+# Open data, licence CC BY 4.0. Attribution: "Fineli, Finnish Institute for Health and Welfare (THL)".
+# Values are per 100 g of edible portion. Fineli reports salt in mg.
+
+FINELI_URL = "https://fineli.fi/fineli/api/v1/foods"
+FINELI_ATTRIBUTION = "Fineli (THL), CC BY 4.0"
+
+
+class FoodCandidate(BaseModel):
+    """A generic food from a composition database, per 100 g."""
+
+    source: Literal["fineli", "usda"]
+    ref: str
+    description: str
+    detail: str = ""
+    nutrition: Per100
+
+    @property
+    def label(self) -> str:
+        if self.source == "fineli":
+            return f"{FINELI_ATTRIBUTION} #{self.ref}: {self.description}"
+        return f"USDA FDC {self.ref}: {self.description}"
+
+
+def _num(d: dict[str, Any], *keys: str) -> float | None:
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, dict):  # some APIs nest {"value": x}
+            v = v.get("value")
+        if v not in (None, ""):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def parse_fineli_food(food: dict[str, Any]) -> FoodCandidate:
+    name = food.get("name") or {}
+    if isinstance(name, str):
+        name = {"en": name}
+    description = name.get("en") or name.get("fi") or name.get("sv") or f"Fineli food {food.get('id')}"
+    kcal = _num(food, "energyKcal", "energy_kcal", "energyKCal")
+    if kcal is None and (kj := _num(food, "energy", "energyKj", "energy_kj")) is not None:
+        kcal = kj / 4.184
+    salt_mg = _num(food, "salt", "saltMg")
+    return FoodCandidate(
+        source="fineli",
+        ref=str(food.get("id", "")),
+        description=description,
+        detail=name.get("fi", "") if name.get("en") else "",
+        nutrition=Per100(
+            kcal=kcal,
+            protein=_num(food, "protein"),
+            fat=_num(food, "fat"),
+            satfat=_num(food, "saturatedFat", "saturated_fat"),
+            carbs=_num(food, "carbohydrate", "carbohydrates"),
+            sugar=_num(food, "sugar", "sugars"),
+            fiber=_num(food, "fiber", "fibre"),
+            salt=salt_mg / 1000 if salt_mg is not None else None,
+        ),
+    )
+
+
+async def fineli_search(http: httpx.AsyncClient, queries: list[str], limit: int = 8) -> list[FoodCandidate]:
+    """Search Fineli with each query (Finnish first works best), merged and de-duplicated."""
+    seen: set[str] = set()
+    out: list[FoodCandidate] = []
+    for q in queries:
+        if not q or len(out) >= limit:
+            continue
+        try:
+            resp = await http.get(FINELI_URL, params={"q": q}, timeout=20.0)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("Fineli search failed: %s", e)
+            return out
+        for food in data if isinstance(data, list) else data.get("foods", []):
+            c = parse_fineli_food(food)
+            if c.ref not in seen and c.nutrition.kcal is not None:
+                seen.add(c.ref)
+                out.append(c)
+    return out[:limit]
+
+
+def usda_candidate(food: UsdaFood) -> FoodCandidate:
+    return FoodCandidate(
+        source="usda",
+        ref=str(food.fdc_id),
+        description=food.description,
+        detail=food.data_type,
+        nutrition=food.nutrition,
+    )

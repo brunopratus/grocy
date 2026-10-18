@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable
 from datetime import date
 from typing import Any, Literal
 
@@ -13,10 +15,13 @@ from .claude import compact_json, image_block
 from .deps import Services
 from .grocy import GrocyError, file_userfield_value
 from .nutrition import (
+    FoodCandidate,
     OffUnavailable,
     Per100,
     calories_per_stock_unit,
+    fineli_search,
     off_lookup,
+    usda_candidate,
     usda_search,
 )
 from .units import UnitError, convert, fmt_amount, normalize_unit
@@ -84,15 +89,16 @@ class LabelExtraction(BaseModel):
 
 class ProduceAdvice(BaseModel):
     english_name: str = Field(description="Generic English food term, e.g. 'carrots, raw'")
-    usda_query: str = Field(description="Best search query for USDA FoodData Central")
+    usda_query: str = Field(description="Best search query for USDA FoodData Central (English)")
+    fineli_query_fi: str = Field(description="Generic Finnish food name for the Fineli database, e.g. 'porkkana'")
     storage_location: Location
     shelf_life_days: int = Field(ge=0, le=3650, description="Typical shelf life where stored, days")
     shelf_life_after_opening_days: int = Field(ge=0, le=3650, description="Shelf life once cut/opened, days")
     typical_piece_weight_g: float | None = Field(None, description="Average weight of one piece in grams")
 
 
-class UsdaPick(BaseModel):
-    index: int | None = Field(description="0-based index of the best matching food, or null if none fits")
+class FoodPick(BaseModel):
+    index: int | None = Field(description="Index of the best matching food, or null if none fits")
     reason: str
 
 
@@ -453,7 +459,8 @@ async def label_photo(
         f"Label photo read for '{product['name']}'",
         product_id=pid,
         product_name=product["name"],
-        data=ext.model_dump(),
+        # Kept for the future Lithuanian food database (phase 6): label text, barcode, per-100 values
+        data={**ext.model_dump(), "barcode": barcode, "nutrition_per_100": per100.model_dump()},
     )
     return {
         "status": status,
@@ -489,32 +496,55 @@ async def _produce_advice(svc: Services, name: str) -> ProduceAdvice:
         max_tokens=1500,
         system="You help a household in Kaunas, Lithuania record fresh market produce (no barcode). "
         "The name may be Lithuanian, English or Portuguese. Give the generic English food term as "
-        "USDA FoodData Central would name it (raw unless stated) and typical home storage values.",
+        "USDA FoodData Central would name it (raw unless stated), the generic Finnish name for the Finnish "
+        "food composition database Fineli, and typical home storage values.",
         content=[{"type": "text", "text": f"Produce: {name}"}],
     )
 
 
-async def _usda_nutrition(svc: Services, advice: ProduceAdvice) -> tuple[Per100 | None, str | None]:
-    foods = await usda_search(svc.http, advice.usda_query, svc.settings.usda_fdc_api_key)
+async def food_candidates(svc: Services, english: str, finnish: str | None = None) -> list[FoodCandidate]:
+    """Generic-food candidates from the configured sources (GENERIC_FOOD_SOURCES), searched in parallel."""
+    jobs: list[Awaitable[list[Any]]] = []
+    for source in svc.settings.generic_food_sources:
+        if source == "fineli":
+            jobs.append(fineli_search(svc.http, [q for q in (finnish, english) if q]))
+        elif source == "usda":
+            jobs.append(usda_search(svc.http, english, svc.settings.usda_fdc_api_key))
+    results = await asyncio.gather(*jobs)
+    out: list[FoodCandidate] = []
+    for res in results:
+        out.extend(r if isinstance(r, FoodCandidate) else usda_candidate(r) for r in res)
+    return out
+
+
+async def generic_nutrition(svc: Services, advice: ProduceAdvice) -> FoodCandidate | None:
+    """Best per-100 g match for a generic food across Fineli and USDA (Claude, cheap model, picks)."""
+    foods = await food_candidates(svc, advice.usda_query, advice.fineli_query_fi)
     if not foods:
-        return None, None
+        return None
     candidates = [
-        {"index": i, "description": f.description, "type": f.data_type, "kcal_100g": f.nutrition.kcal}
+        {
+            "index": i,
+            "source": f.source,
+            "description": f.description,
+            "detail": f.detail,
+            "kcal_100g": round(f.nutrition.kcal or 0),
+        }
         for i, f in enumerate(foods)
     ]
     pick = await svc.claude.structured(
-        task="usda_pick",
-        schema=UsdaPick,
+        task="food_pick",
+        schema=FoodPick,
         cheap=True,
         effort="low",
         max_tokens=1000,
-        system="Pick the USDA food that best matches the produce as bought (prefer raw, whole, generic).",
+        system="Pick the database food that best matches the produce as bought (raw, whole, generic). "
+        "Prefer Fineli (Nordic data, closest to Lithuanian produce) over USDA when both match equally well.",
         content=[{"type": "text", "text": f"Produce: {advice.english_name}\nCandidates: {compact_json(candidates)}"}],
     )
     if pick.index is None or not 0 <= pick.index < len(foods):
-        return None, None
-    food = foods[pick.index]
-    return food.nutrition, f"USDA FDC {food.fdc_id}: {food.description}"
+        return None
+    return foods[pick.index]
 
 
 async def add_produce(svc: Services, body: ProduceIn) -> dict[str, Any]:
@@ -525,12 +555,12 @@ async def add_produce(svc: Services, body: ProduceIn) -> dict[str, Any]:
     advice: ProduceAdvice | None = None
     if product is None:
         advice = await _produce_advice(svc, body.name)
-        per100, usda_desc = await _usda_nutrition(svc, advice)
+        match = await generic_nutrition(svc, advice)
         product = await create_product(
             svc,
             NewProduct(
                 name=body.name.strip().capitalize(),
-                description=f"{advice.english_name}" + (f" — {usda_desc}" if usda_desc else ""),
+                description=f"{advice.english_name}" + (f" — {match.label}" if match else ""),
                 stock_unit="g",
                 purchase_unit="g",
                 location=advice.storage_location,
@@ -538,8 +568,8 @@ async def add_produce(svc: Services, body: ProduceIn) -> dict[str, Any]:
                 after_open_days=advice.shelf_life_after_opening_days,
                 net_amount_per_pack=advice.typical_piece_weight_g,
                 net_unit="g" if advice.typical_piece_weight_g else None,
-                nutrition=per100,
-                nutrition_source="usda" if per100 else None,
+                nutrition=match.nutrition if match else None,
+                nutrition_source=match.source if match else None,
                 store=body.store,
             ),
         )

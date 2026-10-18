@@ -35,7 +35,7 @@ PRODUCT_USERFIELDS = [
     ("sugar_100", "Sugar g / 100", NUMBER),
     ("fiber_100", "Fibre g / 100", NUMBER),
     ("salt_100", "Salt g / 100", NUMBER),
-    ("nutrition_source", "Nutrition source (open_food_facts|label_photo|usda|manual)", TEXT),
+    ("nutrition_source", "Nutrition source (open_food_facts|label_photo|fineli|usda|manual)", TEXT),
     ("net_amount_per_pack", "Net amount per pack", NUMBER),
     ("net_unit", "Net unit (g|ml)", TEXT),
     ("label_photo", "Nutrition label photo", "image"),

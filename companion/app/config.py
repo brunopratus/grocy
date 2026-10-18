@@ -22,6 +22,7 @@ class Settings:
     claude_model_cheap: str
     claude_fallbacks: bool
     usda_fdc_api_key: str
+    generic_food_sources: tuple[str, ...]
     ntfy_topic_url: str
     tz: str
     companion_token: str
@@ -47,6 +48,9 @@ def get_settings() -> Settings:
         claude_model_cheap=env("CLAUDE_MODEL_CHEAP", "claude-haiku-5-5"),
         claude_fallbacks=_bool(env("CLAUDE_FALLBACKS"), True),
         usda_fdc_api_key=env("USDA_FDC_API_KEY", "") or "DEMO_KEY",
+        generic_food_sources=tuple(
+            x.strip() for x in env("GENERIC_FOOD_SOURCES", "fineli,usda").lower().split(",") if x.strip()
+        ),
         ntfy_topic_url=env("NTFY_TOPIC_URL", ""),
         tz=env("TZ", "Europe/Vilnius"),
         companion_token=env("COMPANION_TOKEN", ""),

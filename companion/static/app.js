@@ -212,7 +212,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   on("#produce-form", "submit", async (e) => {
     const body = formJson(e.target, ["weight_g", "count", "price_eur"]);
     const r = await api("/products/produce", { method: "POST", json: body, busy: "Adding produce…" });
-    $("#produce-result").innerHTML = `<div class="card">${esc(r.message)}<br><span class="small muted">${r.status === "created" ? "New product created with USDA nutrition." : ""}</span></div>`;
+    $("#produce-result").innerHTML = `<div class="card">${esc(r.message)}<br><span class="small muted">${r.status === "created" ? (r.product.nutrition_source ? `New product, nutrition from ${r.product.nutrition_source === "fineli" ? "Fineli (THL)" : "USDA"}.` : "New product, no nutrition match found.") : ""}</span></div>`;
     e.target.reset();
     $("#produce-form [name=store]").value = "turgus";
     refreshLookups();

@@ -29,6 +29,7 @@ No upstream file is modified, so upstream merges never conflict.
                               ├──► Grocy REST API (GROCY-API-KEY, private network)
                               ├──► Claude API (Sonnet 5.5 for vision/planning, Haiku 5.5 for small tasks)
                               ├──► Open Food Facts (barcodes)
+                              ├──► Fineli, Finnish food composition database (produce nutrition)
                               └──► USDA FoodData Central (produce nutrition)
 ```
 
@@ -50,31 +51,45 @@ Data model in Grocy:
   named like "household"/"cleaning"/"non-food" are left alone).
 * Prices are stored per stock unit with the shopping location, so Grocy's price history per store works.
 
-## Railway setup (step by step)
+## Deploying to Railway (complete walkthrough)
 
-Railway's UI wording changes from time to time; the settings below are what matters.
+Allow about 45 minutes. Replace `<grocy-domain>` / `<companion-domain>` with the domains Railway gives
+you in steps 2.6 and 5.6. Railway renames menus from time to time; if a label differs, look for the
+same setting nearby.
 
-### 0. GitHub
-1. In GitHub → `brunopratus/grocy` → Settings → General → **Default branch**: switch to `plus`.
-2. Settings → Actions → General → Workflow permissions: **Read and write permissions** and tick
-   **Allow GitHub Actions to create and approve pull requests** (needed by the upstream sync).
+**Railway basics used below:** a *project* is a canvas with boxes (*services*). Click a service box to
+open its panel with the tabs **Deployments · Variables · Metrics · Settings** (plus **Backups** once it
+has a volume). Railway collects your edits as *staged changes*; nothing happens until you press
+**Deploy** (purple button at the top of the canvas).
 
-### 1. Project
-Open the Railway account that already hosts the bank app and create a new project (e.g. *grocy-plus*),
-or add the two services to an existing project. Both services deploy from the GitHub repo
-`brunopratus/grocy`, branch `plus`.
+### Step 0 — before you start (done ✅ / to do)
+- ✅ GitHub default branch is `plus`; ✅ Actions may create pull requests.
+- Get the keys from [Getting the keys and secrets](#getting-the-keys-and-secrets): Anthropic API key,
+  USDA key, an ntfy topic name and a `COMPANION_TOKEN`. (The Grocy API key comes in step 3.)
 
-### 2. Service `grocy`
-1. **New → GitHub Repo →** `brunopratus/grocy`. Rename the service to `grocy` (the name becomes its
-   private hostname `grocy.railway.internal`).
-2. Settings:
-   * Source → Branch: `plus`; Root Directory: empty (repo root, the Dockerfile needs the whole repo).
-   * Config-as-code → Railway config file: `/deploy/grocy/railway.json`
-     (it sets the Dockerfile path `deploy/grocy/Dockerfile`, watch patterns that ignore `companion/**`,
-     and the healthcheck `/login`).
-3. **Volume:** add a volume to the service, mount path **`/var/www/html/data`**. On first start the
-   entrypoint seeds it from the image (`config.php`, `plugins/`, `storage/`) and Grocy creates `grocy.db`.
-4. **Variables:**
+### Step 1 — create the project
+1. Open <https://railway.com/dashboard> and log in (same account as the bank app).
+2. **+ New** (top right) → **Deploy from GitHub repo**.
+3. If `brunopratus/grocy` isn't listed: **Configure GitHub App** → give Railway access to the
+   `brunopratus/grocy` repository → back in Railway pick it.
+4. Railway creates a project with one service and immediately tries to build it. That first build can
+   fail or build the wrong thing — fine, we configure it now. Rename the project (top left, project
+   name → **Settings → Project name**) to `grocy-plus`.
+
+### Step 2 — the `grocy` service
+Click the service box → **Settings** tab:
+1. **Service name** (top of Settings): `grocy`. The name matters: it becomes the private address
+   `grocy.railway.internal` the companion uses.
+2. **Source**: Branch **`plus`**. Root Directory: leave **empty** (the build needs the whole repository).
+3. **Config-as-code → Railway Config File**: **`/deploy/grocy/railway.json`** (absolute path, with the
+   leading `/`). This sets: Dockerfile builder with `deploy/grocy/Dockerfile`, healthcheck `/login`
+   (300 s), restart on failure.
+   Check under **Build** that Builder shows *Dockerfile* and Dockerfile Path `deploy/grocy/Dockerfile`;
+   if not, set them by hand. Optional, **Build → Watch Paths**: `/**` and `!/companion/**` so companion
+   changes don't rebuild Grocy (also in the config file, but set it here if Railway ignores it).
+4. **Volume:** on the canvas, right-click empty space (or press ⌘K / Ctrl+K) → **Volume** → choose the
+   `grocy` service → mount path **`/var/www/html/data`**. A small volume box appears attached to `grocy`.
+5. **Variables** tab → **Raw Editor** → paste and **Update Variables**:
    ```
    PORT=8080
    GROCY_CURRENCY=EUR
@@ -85,55 +100,102 @@ or add the two services to an existing project. Both services deploy from the Gi
    GROCY_MEAL_PLAN_FIRST_DAY_OF_WEEK=1
    TZ=Europe/Vilnius
    ```
-   The image already defaults currency, barcode plugin, opened tracking and TZ; setting them here
-   keeps them visible. **Locale:** Lithuanian exists (`lt`, ~93 % translated). Grocy picks the browser
-   language first, then the per-user setting, then `GROCY_DEFAULT_LOCALE`, so each person can choose
-   in Grocy → user settings; use `GROCY_DEFAULT_LOCALE=lt` if you prefer Lithuanian as the default.
-   Any other Grocy setting from `config-dist.php` can be set the same way with the `GROCY_` prefix.
-5. **Networking:** Generate a public domain targeting port **8080** (or add a custom domain).
-6. Deploy. The log shows `[grocy+] Requested / (HTTP 302), migrations done`.
-
-### 3. Grocy, first login (do this before the companion)
-1. Open the Grocy URL, log in with **admin / admin** and immediately change the password
-   (top right → user menu → Change password). Optionally rename the user.
-2. Users → **Add user** for Raminta.
-3. Manage API keys (user menu → *Manage API keys*) → **Add**: create
-   * one key for the **companion** (note it as `GROCY_API_KEY`),
-   * one key per phone app (the apps can also create their own by logging in; separate keys can be
-     revoked independently). Create each phone's key while logged in as that person.
-
-### 4. Service `companion`
-1. **New → GitHub Repo →** `brunopratus/grocy` again; rename the service to `companion`.
-2. Settings:
-   * Source → Branch `plus`, **Root Directory: `/companion`**.
-   * Config-as-code → Railway config file: `/companion/railway.json`
-     (Dockerfile build, rebuilds only on `companion/**` changes, healthcheck `/health`).
-3. **Volume:** mount path **`/data`**.
-4. **Variables:**
+   (Lithuanian exists as `lt`, ~93 % translated. Each person can pick a language in Grocy's user
+   settings; set `GROCY_DEFAULT_LOCALE=lt` if Lithuanian should be the default. Optional backup
+   settings: `GROCY_BACKUP_HOUR`, `GROCY_BACKUP_KEEP`, `GROCY_BACKUP_DAILY` — see *Backups*.)
+6. **Settings → Networking → Public Networking → Generate Domain**. If asked for a port, enter
+   **8080**. You get something like `grocy-production-ab12.up.railway.app` = `<grocy-domain>`.
+7. Press **Deploy**. Open **Deployments** → the running build → **View logs**. The first build takes
+   5–10 minutes (PHP extensions, JS and PHP packages). Success looks like:
    ```
-   GROCY_URL=http://grocy.railway.internal:8080
-   GROCY_API_KEY=<companion key from step 3>
-   ANTHROPIC_API_KEY=<from console.anthropic.com>
-   COMPANION_TOKEN=<long random string, e.g. `openssl rand -hex 24`>
+   [grocy+] Seeding data volume from image
+   [grocy+] Creating data/config.php from config-dist.php
+   [grocy+] Requested / (HTTP 302), migrations done
+   ```
+   and the deployment turns green (*Active*) after the healthcheck passes.
+
+### Step 3 — first login to Grocy
+Open each link in a browser (desktop is easiest):
+1. `https://<grocy-domain>/login` → user **admin**, password **admin**.
+2. **Change the admin password now:** `https://<grocy-domain>/users` → pencil icon next to *admin* →
+   enter a new password twice → **Save**. (Also reachable via the user menu, top right.)
+3. **Raminta's user:** same page `https://<grocy-domain>/users` → **Add** → username, first name, password
+   → **Save**. New users get all permissions by default (`GROCY_DEFAULT_PERMISSIONS` = ADMIN), which is
+   what a shared household wants.
+4. **Companion API key:** `https://<grocy-domain>/manageapikeys` → **Add** → description `companion` →
+   OK. The new key is highlighted in the list; copy the long value in the *API key* column. This is
+   `GROCY_API_KEY` for step 5.
+5. **Phone keys:** optional now — the Grocy apps can log in with username/password and create their own
+   key. If you prefer separate keys: log in as each person and repeat step 4 on their account.
+6. **Language per person:** `https://<grocy-domain>/usersettings` → *Language*.
+7. `https://<grocy-domain>/about` shows the Grocy version (4.7.1) — a quick check that all is well.
+
+### Step 4 — turn on Railway backups for Grocy
+Click the `grocy` service → **Backups** tab (appears once the volume exists):
+1. **Edit schedule** (or *Backup schedules*) → tick **Daily** and **Weekly** (Monthly too if you like) →
+   save. Daily copies are kept 6 days, weekly 1 month, monthly 3 months.
+2. Press **Backup now** (or *Create backup*) once, so there's a copy of the fresh setup.
+The built-in snapshots (before upgrades and daily at 03:00) run on their own; nothing to switch on.
+
+### Step 5 — the `companion` service
+1. On the canvas: **+ Create** (or ⌘K) → **GitHub Repo** → `brunopratus/grocy` again. A second box
+   appears; open its **Settings**:
+   * **Service name**: `companion`.
+   * **Source**: Branch **`plus`**, **Root Directory: `/companion`**.
+   * **Config-as-code → Railway Config File**: **`/companion/railway.json`** (absolute path; it does not
+     follow the root directory). Sets Dockerfile build, healthcheck `/health`.
+   * Optional, **Build → Watch Paths**: `/companion/**`, so Grocy-only changes don't rebuild the companion.
+2. **Volume:** right-click canvas / ⌘K → **Volume** → service `companion` → mount path **`/data`**.
+3. **Variables → Raw Editor**, paste, fill in the `<…>` parts, **Update Variables**:
+   ```
+   GROCY_URL=http://${{grocy.RAILWAY_PRIVATE_DOMAIN}}:8080
+   GROCY_API_KEY=<key from step 3.4>
+   ANTHROPIC_API_KEY=<sk-ant-… from console.anthropic.com>
+   COMPANION_TOKEN=<your long random string>
    CLAUDE_MODEL=claude-sonnet-5-5
    CLAUDE_MODEL_CHEAP=claude-haiku-5-5
-   USDA_FDC_API_KEY=<free key from https://fdc.nal.usda.gov/api-key-signup, or DEMO_KEY>
-   NTFY_TOPIC_URL=https://ntfy.sh/<hard-to-guess topic, e.g. grocyplus-7f3a9c2e>
+   USDA_FDC_API_KEY=<key from the USDA e-mail, or DEMO_KEY>
+   NTFY_TOPIC_URL=https://ntfy.sh/<your-topic>
    TZ=Europe/Vilnius
    ```
-   `GROCY_URL` uses Railway's private network (no public traffic, no extra latency). If the
-   companion can't reach it (older Railway environments are IPv6-only on the private network;
-   Apache listens on all addresses, so this should work), use the public Grocy URL instead.
-   Optional: `HOUSEHOLD_PEOPLE` (2), `ALERT_HOUR` (8), `ALERT_DUE_DAYS` (3), `CLAUDE_FALLBACKS` (true).
-5. **Networking:** Generate a public domain (target port **8000**).
-6. Deploy. The log shows `setup done: {...}`: units, locations, stores, meal plan sections and
-   userfields now exist in Grocy. `POST /setup` re-runs it anytime.
+   `${{grocy.RAILWAY_PRIVATE_DOMAIN}}` is a Railway *reference variable*: Railway fills in
+   `grocy.railway.internal`, so the companion talks to Grocy over the private network. Projects created
+   after 16 Oct 2025 support IPv4 and IPv6 there; if the companion log ever shows it can't reach Grocy,
+   use the public address instead: `GROCY_URL=https://<grocy-domain>`.
+   Optional: `HOUSEHOLD_PEOPLE=2`, `ALERT_HOUR=8`, `ALERT_DUE_DAYS=3`, `GENERIC_FOOD_SOURCES=fineli,usda`,
+   `CLAUDE_FALLBACKS=true`.
+4. **Settings → Networking → Generate Domain** (port **8000** if asked) = `<companion-domain>`.
+5. **Deploy**. Build takes 1–2 minutes. In the logs look for
+   `setup done: {'changes': [...], 'warnings': [], 'ok': True}` — the companion has created units,
+   locations, stores, meal-plan sections and nutrition fields in Grocy.
+   (Check in Grocy: `https://<grocy-domain>/userfields`, `/locations`, `/shoppinglocations`.)
+6. Companion volume backups: `companion` → **Backups** → **Weekly** is enough.
+
+### Step 6 — check everything
+1. `https://<companion-domain>/health` → `{"ok":true}`.
+2. `https://<companion-domain>/` → log in with `COMPANION_TOKEN` → the home screen with 8 buttons.
+3. **Open / due** shows "Nothing opened or due" (empty stock — expected).
+4. Send a test alert: on a computer run
+   `curl -X POST -H "X-Companion-Token: <token>" "https://<companion-domain>/alerts/send?force=true"`
+   → the ntfy app on both phones gets "Grocy+: nothing to use up".
+5. Nutrition sources: `curl -H "X-Companion-Token: <token>" "https://<companion-domain>/nutrition/search?q=carrot&fi=porkkana"`
+   → candidates from Fineli and USDA with kcal per 100 g.
+6. Then set up the phones (see *Phone setup*).
+
+### Updating later
+Every push to `plus` redeploys automatically (only the service whose files changed, thanks to the watch
+paths). Grocy upgrades arrive as weekly PRs — see *Branch and upstream sync model*. Services with a
+volume have a few seconds of downtime on each deploy.
+
+### Cost on Railway
+The Hobby plan ($5/month, which includes $5 of usage) normally covers both services and volumes for a
+household; Railway bills any usage above that. See **Workspace → Usage** in Railway.
 
 ## Getting the keys and secrets
 
 | Variable | Where it comes from | Cost |
 |---|---|---|
-| `GROCY_API_KEY` | Your Grocy (step 3 above) | free |
+| `GROCY_API_KEY` | Your Grocy (step 3.4 above) | free |
 | `ANTHROPIC_API_KEY` | Claude Console | pay per use |
 | `USDA_FDC_API_KEY` | data.gov sign-up | free |
 | `NTFY_TOPIC_URL` | You invent it | free |
@@ -156,7 +218,7 @@ also create their own key when you log in with username and password.
 
 **USDA FoodData Central key.** Open <https://fdc.nal.usda.gov/api-key-signup>, enter name and e-mail;
 the key arrives by e-mail within minutes. Free, 1,000 requests/hour (far more than needed: it's only used
-when a new market product is created). `DEMO_KEY` works without signing up but is limited to about 30
+when a new market product is created). Fineli needs no key at all. `DEMO_KEY` works without signing up but is limited to about 30
 requests/hour and 50/day per IP, which can fail on busy days.
 
 **ntfy topic.** No account needed. Invent a long, random topic name, e.g. run `openssl rand -hex 8` or
@@ -200,7 +262,7 @@ companion URL, log in, menu → **Install app / Add to Home screen**.
   nutrition, then *Add to stock* with the price and store. Unknown barcodes ask for a photo of the
   nutrition table.
 * **Market (Turgus):** *Market produce* → "morkos, 850 g, €1.20". First time, the product is created
-  with USDA nutrition and typical shelf life.
+  with nutrition from Fineli or USDA and typical shelf life.
 * **Cooking:** *Cook recipe* consumes the ingredients and marks partly used packs as opened, so the
   due date follows "use within N days after opening". The notice tells you what's left and until when.
 * **Jars and leftovers:** *Weigh item* sets the real remaining amount (enable tare weight in Grocy for
@@ -251,7 +313,7 @@ secret `SYNC_TOKEN` (contents, pull requests, workflows: read/write) and the wor
   * receipt photo: about 1–2 cents.
   A normal month is usually **$1–3**. Exact numbers: `GET /usage` (tokens and estimated cost per
   task, logged per call), and the Console's Usage page.
-* Open Food Facts, USDA FDC and ntfy.sh are free.
+* Open Food Facts, Fineli, USDA FDC and ntfy.sh are free (Fineli needs no key).
 
 ## Backups
 
@@ -310,10 +372,13 @@ loses only history (Grocy holds all household data); a weekly Railway backup is 
 |---|---|---|
 | Open Food Facts | barcodes | Free, open. Coverage of Lithuanian-only products (barcodes starting `477`) is thin, so expect label photos for many local brands; international brands sold at Lidl/Maxima are usually present |
 | Label photo + Claude | anything with a nutrition table | Reads LT/LV/ET/PL/EN labels; the authoritative source for packaged food |
-| USDA FoodData Central | market produce, generic foods | Free API, Foundation/SR Legacy per 100 g |
-| Lithuanian national food composition database (SMLPC, *Maisto produktų sudėties ir energijos duomenų bazė*) | reference only | Official generic-food tables, linked from the Ministry of Health; web lookup only, no public API found, so not integrated |
-| Fineli (Finland, THL) | possible future source for generic foods | Open data under CC BY 4.0, Nordic foods close to Lithuanian ones; not integrated yet |
+| **Fineli** (Finnish Institute for Health and Welfare, THL) | market produce, generic foods | Open data, CC BY 4.0; Nordic foods close to Lithuanian ones, per 100 g. Searched first with the Finnish name. Products sourced from it get `nutrition_source=fineli` and the attribution "Fineli (THL), CC BY 4.0 #<id>" in their description. Grocy+ is not produced or endorsed by THL |
+| USDA FoodData Central | market produce, generic foods | Free API, Foundation/SR Legacy per 100 g. Searched in parallel with Fineli; Claude (Haiku) picks the best match across both, preferring Fineli when equally good |
+| Lithuanian national food composition database (SMLPC, *Maisto produktų sudėties ir energijos duomenų bazė*) | reference only (see phase 6) | Official generic-food tables, linked from the Ministry of Health; web lookup only, no public API found |
 | Retailer sites (Barbora/Maxima, Rimi e-shops) | – | Show nutrition on product pages but have no public API; scraping may break their terms, so not used |
+
+`GENERIC_FOOD_SOURCES` (default `fineli,usda`) chooses which generic sources are searched.
+`GET /nutrition/search?q=carrot&fi=porkkana` shows what each source returns — useful to check values.
 
 ## Roadmap
 
@@ -325,6 +390,24 @@ loses only history (Grocy holds all household data); a weekly Railway backup is 
   (`brunopratus/bank`, also on Railway) to receipts by date, amount and merchant; spending per
   week/store next to nutrition targets. Interface only: `companion/app/bank.py`, `GET /bank/matches`
   returns 501.
+* **Phase 6 — a Lithuanian food database (future, not started).** Build an open database of the foods
+  actually sold and eaten in Lithuania, which today exists only partly (national generic tables without an
+  API, few Lithuanian barcodes in Open Food Facts). Ideas to keep in mind:
+  * **Seed data already being collected:** every label photo the household reads is stored in the
+    companion DB (`events` with `kind='label'`): original Lithuanian product name, brand, barcode, net
+    quantity, per-100 values, label language, shelf life after opening. Barcode lookups and produce
+    matches are stored too. Nothing has to change in daily use to start building it.
+  * **Generic foods:** Lithuanian names (*morkos, grikiai, varškė, kefyras, rūgpienis, juoda ruginė
+    duona*…) mapped to Fineli/USDA entries, with values checked against the national SMLPC tables;
+    traditional dishes (cepelinai, šaltibarščiai, kibinai) as recipes built from those.
+  * **Packaged products:** `477…` barcodes from label photos, with the label photo kept as evidence.
+  * **Shape:** its own service or package (`lt-foods`) with an export (CSV/JSON) and a small API that the
+    companion queries before Open Food Facts/Fineli/USDA.
+  * **Sharing back:** contribute packaged products to Open Food Facts (ODbL licence, photos required —
+    which the label workflow already has); check the licence of anything derived from the SMLPC tables
+    before publishing it.
+  * **Quality:** a review step (household confirms Claude's reading), duplicate detection per barcode,
+    and recording the source and date of every value.
 
 ## Local development
 

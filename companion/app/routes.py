@@ -169,6 +169,13 @@ async def week_report(request: Request, start: date | None = None) -> dict[str, 
     return await reports.week_report(svc_of(request), start)
 
 
+@router.get("/nutrition/search")
+async def nutrition_search(request: Request, q: str, fi: str | None = None) -> list[dict[str, Any]]:
+    """Generic-food candidates (Fineli, USDA) per 100 g for a query; `fi` adds a Finnish query for Fineli."""
+    found = await products.food_candidates(svc_of(request), q, fi)
+    return [{**c.model_dump(), "label": c.label} for c in found]
+
+
 @router.get("/usage")
 async def usage(request: Request, since: str | None = None) -> dict[str, Any]:
     return svc_of(request).db.claude_usage(since)
