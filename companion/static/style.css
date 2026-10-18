@@ -33,6 +33,7 @@ header h1 { margin: 0; font-size: 1.15rem; }
 main { padding: 1rem; padding-bottom: calc(env(safe-area-inset-bottom) + 2rem); max-width: 640px; margin: 0 auto; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
 .card:empty { display: none; }
+a { color: var(--accent); }
 h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
 h3 { font-size: .95rem; margin: .8rem 0 .3rem; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: 1rem; }

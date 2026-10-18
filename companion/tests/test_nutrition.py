@@ -1,4 +1,5 @@
 import pytest
+import respx
 
 from app.nutrition import (
     Per100,
@@ -95,3 +96,27 @@ def test_usda_foundation_energy_fallback():
     assert f.nutrition.kcal == 48
     assert f.nutrition.salt == pytest.approx(0.1725)
     assert f.nutrition.is_complete()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_off_lookup_distinguishes_unknown_from_unreachable():
+    import httpx
+
+    from app.nutrition import OffUnavailable, off_lookup
+
+    base = "https://world.openfoodfacts.org/api/v2/product"
+    respx.get(f"{base}/111").respond(json={"status": 0})
+    respx.get(f"{base}/222").respond(503)
+    respx.get(f"{base}/333").respond(
+        json={
+            "status": 1,
+            "product": {"product_name": "Kefyras", "quantity": "1 l", "nutriments": {"energy-kcal_100g": 41}},
+        }
+    )
+    async with httpx.AsyncClient() as http:
+        assert await off_lookup(http, "111", "ua") is None
+        with pytest.raises(OffUnavailable):
+            await off_lookup(http, "222", "ua")
+        p = await off_lookup(http, "333", "ua")
+        assert p is not None and (p.name, p.net_amount, p.net_unit) == ("Kefyras", 1000, "ml")

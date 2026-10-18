@@ -4,10 +4,10 @@
 		"builder": "DOCKERFILE",
 		"dockerfilePath": "deploy/grocy/Dockerfile",
 		"watchPatterns": [
-			"**",
-			"!companion/**",
-			"!GROCY_PLUS.md",
-			"!.github/**"
+			"/**",
+			"!/companion/**",
+			"!/GROCY_PLUS.md",
+			"!/.github/**"
 		]
 	},
 	"deploy": {

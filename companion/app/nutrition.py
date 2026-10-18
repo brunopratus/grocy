@@ -202,18 +202,23 @@ def parse_off_product(code: str, p: dict[str, Any]) -> OffProduct:
     )
 
 
+class OffUnavailable(RuntimeError):
+    """Open Food Facts could not be reached (as opposed to: product unknown)."""
+
+
 async def off_lookup(http: httpx.AsyncClient, code: str, user_agent: str) -> OffProduct | None:
+    """Product from Open Food Facts, None if unknown; raises OffUnavailable on network/server errors."""
     url = f"https://world.openfoodfacts.org/api/v2/product/{code}"
     try:
         resp = await http.get(url, params={"fields": OFF_FIELDS}, headers={"User-Agent": user_agent}, timeout=20.0)
     except httpx.HTTPError as e:
         log.warning("Open Food Facts lookup failed: %s", e)
-        return None
+        raise OffUnavailable(str(e)) from e
     if resp.status_code == 404:
         return None
     if resp.status_code >= 400:
         log.warning("Open Food Facts returned %s", resp.status_code)
-        return None
+        raise OffUnavailable(f"HTTP {resp.status_code}")
     data = resp.json()
     if data.get("status") != 1 or not data.get("product"):
         return None

@@ -13,6 +13,7 @@ from .claude import compact_json, image_block
 from .deps import Services
 from .grocy import GrocyError, file_userfield_value
 from .nutrition import (
+    OffUnavailable,
     Per100,
     calories_per_stock_unit,
     off_lookup,
@@ -277,7 +278,16 @@ async def capture_barcode(svc: Services, code: str) -> dict[str, Any]:
             "message": "Known product." + ("" if complete else " Photo of the nutrition table needed."),
         }
 
-    off = await off_lookup(svc.http, code, svc.settings.off_user_agent)
+    try:
+        off = await off_lookup(svc.http, code, svc.settings.off_user_agent)
+    except OffUnavailable as e:
+        return {
+            "status": "lookup_failed",
+            "barcode": code,
+            "needs_label_photo": True,
+            "message": f"Open Food Facts is unreachable right now ({e}). Try again later, or take a photo of "
+            f"the nutrition table: POST /products/new/label-photo with barcode={code}.",
+        }
     if off is None:
         return {
             "status": "not_found",

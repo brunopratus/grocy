@@ -280,7 +280,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       </table></div>
       <div class="card"><h2>Stock used ${eur(r.consumed_value_eur)} · wasted <span class="${r.wasted_value_eur > 0 ? "bad" : ""}">${eur(r.wasted_value_eur)}</span></h2>
       ${r.stock_wasted.length ? `<h3>Wasted</h3>${list(r.stock_wasted.map((w) => `${esc(w.name)} <span class="small muted">${w.amount} ${esc(w.unit)} · ${eur(w.value_eur)}</span>`))}` : ""}
-      <h3>Consumed</h3>${list(r.stock_consumed.slice(0, 25).map((w) => `${esc(w.name)} <span class="small muted">${w.amount} ${esc(w.unit)} · ${eur(w.value_eur)}</span>`))}</div>`;
+      ${r.stock_consumed.length ? `<h3>Consumed</h3>${list(r.stock_consumed.slice(0, 25).map((w) => `${esc(w.name)} <span class="small muted">${w.amount} ${esc(w.unit)} · ${eur(w.value_eur)}</span>`))}` : '<p class="muted">Nothing consumed from stock this week.</p>'}</div>`;
     $("#report-result").innerHTML = html;
   });
 

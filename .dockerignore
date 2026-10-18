@@ -1,6 +1,9 @@
+# Build context for deploy/grocy/Dockerfile (repo root). Grocy reads changelog/*.md, so keep markdown.
 .git
 .github
 companion
+deploy/grocy/railway.json
+GROCY_PLUS.md
 node_modules
 packages
 public/packages
@@ -8,5 +11,3 @@ data/viewcache
 data/grocy.db
 data/config.php
 data/storage
-*.md
-!README.md

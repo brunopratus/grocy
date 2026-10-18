@@ -1,0 +1,28 @@
+name: Companion CI
+
+on:
+  push:
+    branches: [plus]
+    paths: ["companion/**", ".github/workflows/companion-ci.yml"]
+  pull_request:
+    paths: ["companion/**", ".github/workflows/companion-ci.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: companion
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: mypy app
+      - run: pytest -q

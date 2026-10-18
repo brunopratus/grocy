@@ -1,0 +1,123 @@
+name: Upstream sync
+
+# Weekly: mirror grocy/grocy@release into this fork's `release` branch, and when `plus`
+# is missing upstream commits, open a PR (sync/upstream-<date> -> plus).
+# Requires: Settings -> Actions -> General -> Workflow permissions ->
+#   "Allow GitHub Actions to create and approve pull requests".
+# Optional secret SYNC_TOKEN (fine-grained PAT, contents + pull requests + workflows: write) is only
+# needed if upstream ever starts shipping .github/workflows files (GITHUB_TOKEN can't push those).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_URL: https://github.com/grocy/grocy.git
+      GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: plus
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Fetch upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream release
+          git fetch --no-tags origin release plus
+
+      - name: Mirror upstream/release -> release (fast-forward only)
+        run: |
+          if [ "$(git rev-parse origin/release)" = "$(git rev-parse upstream/release)" ]; then
+            echo "release is up to date"
+          elif git merge-base --is-ancestor origin/release upstream/release; then
+            git push origin upstream/release:refs/heads/release
+            echo "release fast-forwarded to $(git rev-parse --short upstream/release)"
+          else
+            echo "::error::origin/release has commits that are not in upstream/release; it must stay an untouched mirror"
+            exit 1
+          fi
+
+      - name: Open PR into plus when upstream has new commits
+        run: |
+          set -euo pipefail
+          behind=$(git rev-list --count origin/plus..upstream/release)
+          if [ "$behind" -eq 0 ]; then
+            echo "plus already contains upstream/release"
+            exit 0
+          fi
+          upstream_sha=$(git rev-parse upstream/release)
+          if gh pr list --base plus --state open --json headRefName,body \
+               --jq ".[] | select(.headRefName | startswith(\"sync/upstream-\")) | .body" | grep -q "$upstream_sha"; then
+            echo "an open sync PR already covers $upstream_sha"
+            exit 0
+          fi
+
+          version=$(git show upstream/release:version.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Version'])")
+          release_date=$(git show upstream/release:version.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ReleaseDate',''))")
+          branch="sync/upstream-$(date -u +%Y-%m-%d)"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            branch="$branch-$(date -u +%H%M)"
+          fi
+
+          git checkout -B "$branch" origin/plus
+          draft=""
+          conflicts=""
+          if git merge --no-ff --no-edit -m "Merge upstream Grocy v$version (release)" upstream/release; then
+            echo "merged cleanly"
+          else
+            conflicts=$(git diff --name-only --diff-filter=U || true)
+            git merge --abort
+            # Hand over upstream's tip as the PR head; GitHub shows the conflicts to resolve.
+            git checkout -B "$branch" upstream/release
+            draft="--draft"
+          fi
+          git push -u origin "$branch"
+
+          {
+            echo "Upstream Grocy **v$version** ($release_date) has $behind commit(s) that \`plus\` does not have yet."
+            echo
+            echo "Upstream release head: \`$upstream_sha\`"
+            echo
+            if [ -n "$draft" ]; then
+              echo "### ⚠️ Merge conflicts"
+              echo "The automatic merge into \`plus\` failed. Conflicting files:"
+              echo '```'
+              echo "$conflicts"
+              echo '```'
+              echo "Grocy+ only adds new paths (companion/, deploy/grocy/, .github/workflows/, GROCY_PLUS.md, .dockerignore),"
+              echo "so a conflict means one of those paths now also exists upstream. Resolve locally:"
+              echo '```'
+              echo "git fetch origin && git checkout plus && git merge origin/$branch"
+              echo '```'
+              echo
+            fi
+            echo "### Upgrade checklist"
+            echo "1. Back up the Grocy volume (Railway → grocy service → Volumes → Backups)."
+            echo "2. Merge this PR. Railway redeploys the grocy service from \`plus\`."
+            echo "3. The entrypoint requests \`/\`, which runs Grocy's database migrations."
+            echo
+            echo "### Commits"
+            echo '```'
+            git log --oneline --no-decorate origin/plus..upstream/release | head -n 100
+            echo '```'
+          } > /tmp/pr-body.md
+
+          gh pr create --base plus --head "$branch" $draft \
+            --title "Sync upstream Grocy v$version" \
+            --body-file /tmp/pr-body.md

@@ -70,7 +70,9 @@ class Catalog:
             self.qu_by_unit.setdefault(unit, int(qu["id"]))
         self.locations = {loc["name"].lower(): int(loc["id"]) for loc in await grocy.objects("locations")}
         self.shopping_locations = {s["name"].lower(): int(s["id"]) for s in await grocy.objects("shopping_locations")}
-        self.meal_sections = {s["name"].lower(): int(s["id"]) for s in await grocy.objects("meal_plan_sections")}
+        self.meal_sections = {
+            s["name"].lower(): int(s["id"]) for s in await grocy.objects("meal_plan_sections") if s.get("name")
+        }
         return self
 
     def unit_of(self, qu_id: int | str | None) -> str:
@@ -128,7 +130,7 @@ async def run_setup(grocy: GrocyClient, catalog: Catalog) -> dict[str, Any]:
     for name in SHOPPING_LOCATIONS:
         await _ensure(grocy, "shopping_locations", stores, name, {"name": name}, report)
 
-    sections = {s["name"].lower(): s for s in await grocy.objects("meal_plan_sections")}
+    sections = {s["name"].lower(): s for s in await grocy.objects("meal_plan_sections") if s.get("name")}
     for name, sort, time_info in MEAL_SECTIONS:
         await _ensure(
             grocy,

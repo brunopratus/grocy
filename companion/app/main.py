@@ -28,6 +28,7 @@ from .setup import Catalog, run_setup
 from .units import UnitError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("companion")
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -43,7 +44,9 @@ async def _bootstrap(svc: Services) -> None:
             return
         except (GrocyError, httpx.HTTPError) as e:
             log.warning("setup attempt %d failed: %s", attempt + 1, e)
-            await asyncio.sleep(min(5 * (attempt + 1), 60))
+        except Exception:
+            log.exception("setup attempt %d failed unexpectedly", attempt + 1)
+        await asyncio.sleep(min(5 * (attempt + 1), 60))
     log.error("setup gave up; call POST /setup once Grocy is reachable")
 
 
@@ -133,6 +136,11 @@ def create_app(services: Services | None = None, *, start_background: bool = Tru
     @app.exception_handler(ValueError)
     async def value_error(_: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        log.exception("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse({"detail": f"Internal error: {type(exc).__name__}: {exc}"}, status_code=500)
 
     app.include_router(router)
 
