@@ -1,0 +1,15 @@
+{
+  "name": "Grocy+",
+  "short_name": "Grocy+",
+  "description": "Household grocery companion: scan, cook, plan, waste less.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f3",
+  "theme_color": "#2f6f4f",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

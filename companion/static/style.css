@@ -1,0 +1,73 @@
+:root {
+  --bg: #f4f6f3;
+  --card: #ffffff;
+  --text: #1c2420;
+  --muted: #66736c;
+  --accent: #2f6f4f;
+  --accent-text: #ffffff;
+  --border: #d9e0db;
+  --warn: #b85c00;
+  --bad: #b3261e;
+  --good: #2f6f4f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111613;
+    --card: #1b221e;
+    --text: #e6ece8;
+    --muted: #9aa8a0;
+    --accent: #5fb98a;
+    --accent-text: #0d1410;
+    --border: #2c3631;
+    --warn: #f0a050;
+    --bad: #f28b82;
+    --good: #5fb98a;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: .5rem;
+  padding: calc(env(safe-area-inset-top) + .6rem) 1rem .6rem; background: var(--accent); color: var(--accent-text); }
+header h1 { margin: 0; font-size: 1.15rem; }
+main { padding: 1rem; padding-bottom: calc(env(safe-area-inset-bottom) + 2rem); max-width: 640px; margin: 0 auto; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
+.card:empty { display: none; }
+h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+h3 { font-size: .95rem; margin: .8rem 0 .3rem; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: 1rem; }
+.grid button { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: 1.1rem .5rem;
+  font-size: 1.8rem; background: var(--card); color: var(--text); border: 1px solid var(--border); }
+.grid button span { font-size: .9rem; }
+label { display: block; margin-bottom: .75rem; font-size: .85rem; color: var(--muted); }
+label.check { display: flex; align-items: center; gap: .5rem; color: var(--text); font-size: .95rem; }
+label.check input { width: auto; margin: 0; }
+label.file { padding: .8rem; border: 1px dashed var(--border); border-radius: 10px; color: var(--text); }
+input, select, textarea { display: block; width: 100%; margin-top: .25rem; padding: .65rem .7rem; font: inherit;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+button { font: inherit; font-weight: 600; padding: .7rem 1rem; border: 0; border-radius: 10px; cursor: pointer;
+  background: var(--accent); color: var(--accent-text); }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button.icon { background: transparent; color: inherit; font-size: 1.3rem; padding: .2rem .5rem; }
+.row { display: flex; gap: .6rem; align-items: flex-end; }
+.row > * { flex: 1; }
+video { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; margin-bottom: .6rem; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+ul.list { list-style: none; margin: 0; padding: 0; }
+ul.list li { padding: .55rem 0; border-bottom: 1px solid var(--border); }
+ul.list li:last-child { border-bottom: 0; }
+.badge { display: inline-block; font-size: .75rem; padding: .05rem .45rem; border-radius: 999px; border: 1px solid currentColor; }
+.bad { color: var(--bad); } .warn { color: var(--warn); } .good { color: var(--good); }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { text-align: left; padding: .35rem .25rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+#toast { position: fixed; left: 1rem; right: 1rem; bottom: calc(env(safe-area-inset-bottom) + 1rem); z-index: 5;
+  padding: .8rem 1rem; border-radius: 12px; background: var(--text); color: var(--bg); }
+#busy { position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; background: color-mix(in srgb, var(--bg) 80%, transparent); }
+#busy[hidden], [hidden] { display: none !important; }
+.spinner { width: 42px; height: 42px; border: 4px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }

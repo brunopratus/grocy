@@ -1,0 +1,112 @@
+"""Phase 4: receipt import.
+
+Built now: ``POST /receipts/photo`` — Claude parses a receipt photo, lines are matched to
+Grocy products, and (with ``commit=true``) matched food lines are added to stock with
+price and store. The original photo is kept under ``/data/receipts``.
+
+TODO (phase 4, later):
+  * IMAP mailbox for Maxima / Rimi e-receipts (``ImapReceiptSource``): poll, parse the
+    HTML/PDF attachment with the same ``ReceiptParse`` schema, store the original.
+  * Optional Lidl Plus connector (unofficial API, fragile) behind ``ReceiptSource``.
+  * Remember line-text -> product mappings so repeat purchases match without Claude.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Literal, Protocol
+
+from pydantic import BaseModel, Field
+
+from .claude import compact_json, image_block
+from .deps import Services
+from .products import StockAddIn, add_stock
+
+log = logging.getLogger(__name__)
+
+
+class ReceiptLine(BaseModel):
+    text: str = Field(description="Line text as printed")
+    name_en: str = Field(description="Generic English product name")
+    quantity: float = Field(gt=0, description="Quantity bought (weight or count)")
+    unit: Literal["g", "kg", "ml", "l", "piece", "pack"]
+    line_total_eur: float = Field(description="Amount paid for this line after line discounts")
+    is_food: bool = True
+    product_id: int | None = Field(None, description="Matching catalog product id, only when clearly the same")
+
+
+class ReceiptParse(BaseModel):
+    store: str | None = Field(None, description="Maxima, Rimi, Lidl, Norfa, IKI or other")
+    date: str | None = Field(None, description="Purchase date YYYY-MM-DD")
+    total_eur: float | None = None
+    lines: list[ReceiptLine]
+
+
+class ReceiptSource(Protocol):
+    """Interface for automatic receipt sources (IMAP e-receipts, Lidl Plus...). Not implemented yet."""
+
+    async def fetch_new(self) -> list[tuple[bytes, str]]:
+        """Return new receipt originals as (bytes, media_type)."""
+        ...
+
+
+SYSTEM = """You read Lithuanian supermarket receipts (Maxima, Rimi, Lidl, Norfa, IKI). Lines are usually
+Lithuanian and abbreviated. Weighed items show a weight like '0,734 kg x 2,49'. Apply line discounts
+('Nuolaida') to the line they belong to. Skip deposit (užstatas), bags and payment lines.
+Map lines to catalog products by product_id only when it is clearly the same food."""
+
+
+async def import_photo(
+    svc: Services, image: bytes, media_type: str | None, commit: bool, data_dir: str
+) -> dict[str, Any]:
+    folder = Path(data_dir) / "receipts"
+    folder.mkdir(parents=True, exist_ok=True)
+    original = folder / f"{datetime.now():%Y%m%d-%H%M%S}.jpg"
+    original.write_bytes(image)
+
+    catalog = [{"id": int(p["id"]), "name": p["name"]} for p in await svc.products()]
+    parsed = await svc.claude.structured(
+        task="receipt_photo",
+        schema=ReceiptParse,
+        system=SYSTEM,
+        effort="medium",
+        max_tokens=8000,
+        content=[
+            image_block(image, media_type),
+            {"type": "text", "text": f"Product catalog: {compact_json(catalog)}\nParse this receipt."},
+        ],
+    )
+    results: list[dict[str, Any]] = []
+    known_ids = {c["id"] for c in catalog}
+    for line in parsed.lines:
+        row: dict[str, Any] = line.model_dump()
+        if commit and line.is_food and line.product_id in known_ids:
+            try:
+                res = await add_stock(
+                    svc,
+                    StockAddIn(
+                        product_id=line.product_id,
+                        amount=line.quantity,
+                        unit=line.unit,
+                        price_total=line.line_total_eur,
+                        store=parsed.store,
+                    ),
+                )
+                row["added"] = res["message"]
+            except Exception as e:  # noqa: BLE001 - report per line
+                row["error"] = str(e)
+        results.append(row)
+    try:
+        purchase_date = date.fromisoformat(parsed.date) if parsed.date else None
+    except ValueError:
+        purchase_date = None
+    return {
+        "store": parsed.store,
+        "date": purchase_date.isoformat() if purchase_date else None,
+        "total_eur": parsed.total_eur,
+        "lines": results,
+        "committed": commit,
+        "original": original.name,
+    }

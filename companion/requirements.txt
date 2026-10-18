@@ -1,0 +1,8 @@
+fastapi==0.146.0
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+anthropic==1.15.0
+apscheduler==3.11.3
+pydantic==2.14.1
+python-multipart==0.0.32
+pillow==12.1.0

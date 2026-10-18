@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f6f4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Grocy+">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>Grocy+</title>
+</head>
+<body>
+<header>
+  <button id="back" class="icon" hidden aria-label="Back">←</button>
+  <h1 id="title">Grocy+</h1>
+</header>
+
+<main>
+  <!-- Login -->
+  <section id="login" class="panel" hidden>
+    <form id="login-form" class="card">
+      <label>Companion token<input type="password" name="token" autocomplete="current-password" required></label>
+      <button type="submit">Log in</button>
+    </form>
+  </section>
+
+  <!-- Home -->
+  <section id="home" class="panel" hidden>
+    <div class="grid">
+      <button data-go="scan">📷<span>Scan barcode</span></button>
+      <button data-go="label">🏷️<span>Nutrition label</span></button>
+      <button data-go="produce">🥕<span>Market produce</span></button>
+      <button data-go="weigh">⚖️<span>Weigh item</span></button>
+      <button data-go="cook">🍳<span>Cook recipe</span></button>
+      <button data-go="due">⏰<span>Open / due</span></button>
+      <button data-go="plan">🗓️<span>Week plan</span></button>
+      <button data-go="report">📊<span>Weekly report</span></button>
+    </div>
+    <div id="home-due" class="card"></div>
+    <p class="muted small"><a href="#" data-go="events">History</a> · <a href="#" id="logout">Log out</a></p>
+  </section>
+
+  <!-- Scan -->
+  <section id="scan" class="panel" hidden>
+    <div class="card">
+      <video id="video" playsinline muted></video>
+      <div class="row">
+        <button id="scan-start">Start camera</button>
+        <button id="scan-stop" class="secondary">Stop</button>
+      </div>
+      <form id="manual-code" class="row">
+        <input name="code" inputmode="numeric" placeholder="or type the barcode">
+        <button type="submit" class="secondary">Look up</button>
+      </form>
+    </div>
+    <div id="scan-result"></div>
+    <form id="add-stock" class="card" hidden>
+      <h2>Add to stock</h2>
+      <input type="hidden" name="product_id">
+      <div class="row">
+        <label>Amount<input name="amount" type="number" step="any" min="0" value="1" required></label>
+        <label>Unit<select name="unit"><option>pack</option><option>piece</option><option>g</option>
+          <option>kg</option><option>ml</option><option>l</option></select></label>
+      </div>
+      <div class="row">
+        <label>Price € (total)<input name="price_total" type="number" step="0.01" min="0"></label>
+        <label>Store<select name="store" class="stores"></select></label>
+      </div>
+      <label>Best before<input name="best_before" type="date"></label>
+      <label class="file">📸 Read date from photo<input id="due-photo" type="file" accept="image/*" capture="environment"></label>
+      <button type="submit">Add</button>
+    </form>
+  </section>
+
+  <!-- Label photo -->
+  <section id="label" class="panel" hidden>
+    <form id="label-form" class="card">
+      <label>Product<select name="product_id" class="products"><option value="new">New product</option></select></label>
+      <label>Barcode (optional)<input name="barcode" inputmode="numeric"></label>
+      <label class="file">📸 Nutrition table<input name="img1" type="file" accept="image/*" capture="environment" required></label>
+      <label class="file">📸 Front / net weight (optional)<input name="img2" type="file" accept="image/*" capture="environment"></label>
+      <button type="submit">Read label</button>
+    </form>
+    <div id="label-result"></div>
+  </section>
+
+  <!-- Produce -->
+  <section id="produce" class="panel" hidden>
+    <form id="produce-form" class="card">
+      <label>Name<input name="name" list="product-names" required placeholder="e.g. Morkos / carrots"></label>
+      <div class="row">
+        <label>Weight g<input name="weight_g" type="number" step="any" min="0"></label>
+        <label>or count<input name="count" type="number" step="1" min="0"></label>
+      </div>
+      <div class="row">
+        <label>Price €<input name="price_eur" type="number" step="0.01" min="0"></label>
+        <label>Store<select name="store" class="stores"></select></label>
+      </div>
+      <button type="submit">Add produce</button>
+    </form>
+    <div id="produce-result"></div>
+  </section>
+
+  <!-- Weigh -->
+  <section id="weigh" class="panel" hidden>
+    <form id="weigh-form" class="card">
+      <label>Product<select name="product_id" class="products" required></select></label>
+      <label>Measured grams<input name="grams_measured" type="number" step="any" min="0" required></label>
+      <label class="check"><input name="includes_container" type="checkbox"> includes the container</label>
+      <label>Container g (if no tare set in Grocy)<input name="container_g" type="number" step="any" min="0"></label>
+      <button type="submit">Save weight</button>
+    </form>
+    <div id="weigh-result"></div>
+  </section>
+
+  <!-- Cook -->
+  <section id="cook" class="panel" hidden>
+    <form id="cook-form" class="card">
+      <label>Recipe<select name="recipe_id" class="recipes" required></select></label>
+      <label>Servings<input name="servings" type="number" min="1" step="1"></label>
+      <div class="row">
+        <button type="button" id="cook-nutrition" class="secondary">Nutrition</button>
+        <button type="submit">Cook now</button>
+      </div>
+    </form>
+    <div id="cook-result"></div>
+  </section>
+
+  <!-- Open / due -->
+  <section id="due" class="panel" hidden>
+    <div class="row card">
+      <label>Due within days<input id="due-days" type="number" value="3" min="0" max="60"></label>
+      <button id="due-refresh" class="secondary">Refresh</button>
+    </div>
+    <div id="due-list"></div>
+  </section>
+
+  <!-- Week plan -->
+  <section id="plan" class="panel" hidden>
+    <form id="plan-form" class="card">
+      <label class="file">📄 Weekly plan (PDF / text / photo)<input name="file" type="file" accept=".pdf,.txt,.md,image/*"></label>
+      <label>…or paste it<textarea name="text" rows="4"></textarea></label>
+      <div class="row">
+        <label>Week starts<input name="week_start" type="date"></label>
+        <label>kcal / person<input name="kcal_target" type="number" min="1000" max="5000" step="50" placeholder="2000"></label>
+      </div>
+      <div class="row">
+        <label>Budget € / week<input name="budget_eur" type="number" min="0" step="1"></label>
+        <label>People<input name="people" type="number" min="1" value="2"></label>
+      </div>
+      <label>Preferences<input name="preferences" placeholder="e.g. no pork, quick lunches"></label>
+      <label class="check"><input name="dry_run" type="checkbox" checked> Preview only (don't write to Grocy)</label>
+      <button type="submit">Generate plan</button>
+    </form>
+    <div id="plan-result"></div>
+  </section>
+
+  <!-- Report -->
+  <section id="report" class="panel" hidden>
+    <form id="report-form" class="row card">
+      <label>Week starting<input name="start" type="date"></label>
+      <button type="submit" class="secondary">Show</button>
+    </form>
+    <div id="report-result"></div>
+  </section>
+
+  <!-- Events -->
+  <section id="events" class="panel" hidden>
+    <div id="events-list"></div>
+  </section>
+</main>
+
+<datalist id="product-names"></datalist>
+<div id="toast" role="status" hidden></div>
+<div id="busy" hidden><div class="spinner"></div><p id="busy-text">Working…</p></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</body>
+</html>
