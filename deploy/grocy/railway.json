@@ -1,0 +1,19 @@
+{
+	"$schema": "https://railway.com/railway.schema.json",
+	"build": {
+		"builder": "DOCKERFILE",
+		"dockerfilePath": "deploy/grocy/Dockerfile",
+		"watchPatterns": [
+			"**",
+			"!companion/**",
+			"!GROCY_PLUS.md",
+			"!.github/**"
+		]
+	},
+	"deploy": {
+		"healthcheckPath": "/login",
+		"healthcheckTimeout": 300,
+		"restartPolicyType": "ON_FAILURE",
+		"restartPolicyMaxRetries": 5
+	}
+}
