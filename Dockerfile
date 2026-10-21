@@ -1,5 +1,6 @@
 # Grocy+ : upstream Grocy built from this fork, for Railway.
-# Build context = repository root:  docker build -f deploy/grocy/Dockerfile .
+# Build context = repository root:  docker build .
+# (At the repo root so Railway always builds with it instead of auto-detecting PHP with Railpack.)
 
 # --- Frontend dependencies (yarn writes to public/packages via .yarnrc) ---
 # node:24, not 22: @zxing/library 0.23 declares engines.node >= 24

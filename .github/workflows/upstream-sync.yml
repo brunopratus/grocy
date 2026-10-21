@@ -100,7 +100,7 @@ jobs:
               echo '```'
               echo "$conflicts"
               echo '```'
-              echo "Grocy+ only adds new paths (companion/, deploy/grocy/, .github/workflows/, GROCY_PLUS.md, .dockerignore, railway.json),"
+              echo "Grocy+ only adds new paths (companion/, deploy/grocy/, .github/workflows/, GROCY_PLUS.md, .dockerignore, railway.json, Dockerfile),"
               echo "so a conflict means one of those paths now also exists upstream. Resolve locally:"
               echo '```'
               echo "git fetch origin && git checkout plus && git merge origin/$branch"
