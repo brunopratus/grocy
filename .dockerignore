@@ -2,7 +2,7 @@
 .git
 .github
 companion
-deploy/grocy/railway.json
+railway.json
 GROCY_PLUS.md
 node_modules
 packages

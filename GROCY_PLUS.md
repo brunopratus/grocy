@@ -11,7 +11,8 @@ This branch (`plus`) is upstream Grocy **unchanged** plus new files only:
 
 | Path | What |
 |---|---|
-| `deploy/grocy/` | Dockerfile, entrypoint, Apache/PHP config, `railway.json` for the Grocy service |
+| `deploy/grocy/` | Dockerfile, entrypoint, backup script, Apache/PHP config for the Grocy service |
+| `railway.json` | Railway build settings for the Grocy service (read automatically at the repo root) |
 | `companion/` | The companion service (FastAPI). API reference: [`companion/README.md`](companion/README.md) |
 | `.github/workflows/` | Weekly upstream sync, companion CI |
 | `.dockerignore`, `GROCY_PLUS.md` | Build context rules, this document |
@@ -81,12 +82,14 @@ Click the service box → **Settings** tab:
 1. **Service name** (top of Settings): `grocy`. The name matters: it becomes the private address
    `grocy.railway.internal` the companion uses.
 2. **Source**: Branch **`plus`**. Root Directory: leave **empty** (the build needs the whole repository).
-3. **Config-as-code → Railway Config File**: **`/deploy/grocy/railway.json`** (absolute path, with the
-   leading `/`). This sets: Dockerfile builder with `deploy/grocy/Dockerfile`, healthcheck `/login`
-   (300 s), restart on failure.
-   Check under **Build** that Builder shows *Dockerfile* and Dockerfile Path `deploy/grocy/Dockerfile`;
-   if not, set them by hand. Optional, **Build → Watch Paths**: `/**` and `!/companion/**` so companion
-   changes don't rebuild Grocy (also in the config file, but set it here if Railway ignores it).
+3. **Build settings** come from `railway.json` at the repository root, which Railway reads
+   automatically for this service: Dockerfile builder with `deploy/grocy/Dockerfile`, healthcheck
+   `/login` (300 s), restart on failure. If the service shows a **Config-as-code → Railway Config File**
+   field, enter **`/railway.json`**. Check under **Build** that Builder shows *Dockerfile* and Dockerfile
+   Path `deploy/grocy/Dockerfile`. If a build log ever mentions *Railpack* or `composer install` failing,
+   Railway didn't read the file: add the variable `RAILWAY_DOCKERFILE_PATH=deploy/grocy/Dockerfile` and
+   redeploy. Optional, **Build → Watch Paths**: `/**` and `!/companion/**` so companion changes don't
+   rebuild Grocy.
 4. **Volume:** on the canvas, right-click empty space (or press ⌘K / Ctrl+K) → **Volume** → choose the
    `grocy` service → mount path **`/var/www/html/data`**. A small volume box appears attached to `grocy`.
 5. **Variables** tab → **Raw Editor** → paste and **Update Variables**:
