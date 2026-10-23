@@ -29,21 +29,6 @@ if [ ! -f "$DATA_DIR/config.php" ]; then
 	sed -i "s/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', true)/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', false)/" "$DATA_DIR/config.php"
 fi
 
-# Grocy+ designs for Grocy's own pages: Grocy includes data/custom_css.html and custom_js.html
-# on every page. Default design from GROCY_PLUS_THEME (ledger|bento|night|label|native|off);
-# each browser can switch in "View settings". Files someone wrote by hand are left alone.
-theme="${GROCY_PLUS_THEME:-ledger}"
-case "$theme" in ledger|bento|night|label|native|off) ;; *) echo "[grocy+] Unknown GROCY_PLUS_THEME '$theme', using ledger"; theme=ledger ;; esac
-for f in custom_css.html custom_js.html; do
-	dest="$DATA_DIR/$f"
-	if [ ! -e "$dest" ] || grep -q "grocy-plus-theme" "$dest"; then
-		sed "s/__GROCY_PLUS_THEME__/${theme}/" "$APP_DIR/deploy/grocy/theme/$f" > "$dest"
-	else
-		echo "[grocy+] Keeping existing data/$f (not ours)"
-	fi
-done
-echo "[grocy+] Design: $theme (switchable per browser under View settings)"
-
 # Before a new Grocy version migrates the database, keep a full snapshot of the old state.
 # (Apache isn't running yet, so nothing can trigger the migrations before this.)
 version="$(php -r 'echo json_decode(file_get_contents("/var/www/html/version.json"))->Version;')"
