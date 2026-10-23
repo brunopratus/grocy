@@ -40,6 +40,10 @@ function show(id) {
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
+  if (!["scan", "label", "receipt"].includes(id)) receiptCtx = null;
+  const forLine = receiptCtx != null && (id === "scan" || id === "label") ? lastReceipt?.lines[receiptCtx] : null;
+  $("#ctx").hidden = !forLine;
+  if (forLine) $("#ctx-text").textContent = forLine.text;
   if (id !== "scan") stopScan();
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
@@ -130,6 +134,14 @@ function stopScan() { if (scanControls) { scanControls.stop(); scanControls = nu
 async function lookupCode(code) {
   const r = await api(`/products/barcode/${encodeURIComponent(code)}`, { method: "POST", busy: "Looking up…" });
   const p = r.product;
+  if (receiptCtx != null) {
+    $("#add-stock").hidden = true;  // the receipt adds the stock, not the scan screen
+    if (p) return assignToLine(p);
+    $("#label-form [name=product_id]").value = "new";
+    $("#label-form [name=barcode]").value = code;
+    show("label");
+    return toast("Not found in Open Food Facts: take a photo of the nutrition table", 6000);
+  }
   let html = `<div class="card"><h2>${esc(p ? p.name : code)}</h2><p>${esc(r.message)}</p>`;
   if (p?.nutrition_per_100?.kcal != null) {
     const n = p.nutrition_per_100;
@@ -152,40 +164,176 @@ async function lookupCode(code) {
   }
 }
 
-// --- receipt -------------------------------------------------------------------------------
-const RECEIPT_UNITS = ["piece", "pack", "g", "kg", "ml", "l"];
+// --- receipt checklist -------------------------------------------------------------------
+// Receipt photo -> lines -> per line: in Grocy? amount (pack size)? nutrition? -> add to stock.
+// Missing products are scanned / label-photographed from the line itself (receiptCtx = line index).
 let lastReceipt = null;
+let receiptCtx = null;
+const COUNT_UNITS = ["piece", "pack"];
+const MASS_VOL = ["g", "kg", "ml", "l"];
 
-function renderReceipt(r) {
-  lastReceipt = r;
-  const opts = (sel) => `<option value="">Skip</option>` + lookups.products
+const hasNutrition = (card) => {
+  const n = card?.nutrition_per_100 || {};
+  return [n.kcal, n.protein, n.fat, n.carbs].every((v) => v != null);
+};
+const needsPack = (l) => COUNT_UNITS.includes(l.unit) && l.product && MASS_VOL.includes(l.product.stock_unit);
+const baseUnit = (u) => (u === "kg" || u === "g" ? "g" : u === "l" || u === "ml" ? "ml" : null);
+
+function initLine(l) {
+  l.include = l.include ?? Boolean(l.is_food);
+  if (l.pack_size == null && l.product?.net_amount_per_pack) {
+    l.pack_size = Number(l.product.net_amount_per_pack);
+    l.pack_unit = baseUnit(l.product.net_unit) || "g";
+  }
+  l.pack_unit = l.pack_unit || baseUnit(l.product?.stock_unit) || "g";
+}
+
+function lineState(l) {
+  if (!l.product) return { ok: false, why: "missing" };
+  if (needsPack(l) && !l.pack_size) return { ok: false, why: "pack" };
+  return { ok: true, why: hasNutrition(l.product) ? "" : "nutrition" };
+}
+
+function amountHtml(l, i) {
+  if (!COUNT_UNITS.includes(l.unit)) return `<div class="ramount">Amount <strong>${l.quantity} ${esc(l.unit)}</strong> (weighed)</div>`;
+  const total = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
+  const units = ["g", "ml"].map((u) => `<option${u === l.pack_unit ? " selected" : ""}>${u}</option>`).join("");
+  return `<div class="ramount">${l.quantity} ${esc(l.unit)} ×
+    <input class="rpack" data-i="${i}" type="number" inputmode="decimal" min="0" step="any" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
+    <select class="rpunit" data-i="${i}">${units}</select> <span class="rtotal">${total}</span></div>`;
+}
+
+function chip(ok, text, warn) {
+  return `<span class="chip ${ok ? "ok" : warn ? "warn" : "bad"}">${ok ? "✓" : "!"} ${esc(text)}</span>`;
+}
+
+function chipsHtml(l) {
+  return [
+    l.product ? chip(true, "In Grocy") : chip(false, "Missing in Grocy"),
+    l.product ? (hasNutrition(l.product) ? chip(true, "Nutrition") : chip(false, "No nutrition", true)) : "",
+    l.product && needsPack(l) ? (l.pack_size ? chip(true, "Amount") : chip(false, "Pack size?")) : "",
+  ].join("");
+}
+
+function summaryHtml(r) {
+  const inc = r.lines.filter((l) => l.include);
+  const ready = inc.filter((l) => lineState(l).ok).length;
+  const noNut = inc.filter((l) => l.product && !hasNutrition(l.product)).length;
+  return { ready, html: `<span><b>${ready}</b> of ${inc.length} ready</span>${noNut ? `<span class="warn">${noNut} without nutrition</span>` : ""}` };
+}
+
+// Typing a pack size updates the line in place (a full redraw would remove the box being edited)
+function updateReceiptLine(i) {
+  const l = lastReceipt.lines[i];
+  const li = $(`#receipt-result .rline[data-i="${i}"]`);
+  li.querySelector(".chips").innerHTML = chipsHtml(l);
+  li.querySelector(".rtotal").innerHTML = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
+  const hint = li.querySelector(".rhint");
+  if (hint) hint.hidden = Boolean(l.pack_size) || !needsPack(l);
+  const sum = summaryHtml(lastReceipt);
+  $("#receipt-result .rsum").innerHTML = sum.html;
+  const btn = $("#receipt-commit");
+  btn.disabled = !sum.ready;
+  btn.textContent = `Add ${sum.ready} ready line${sum.ready === 1 ? "" : "s"} to stock`;
+}
+
+function renderReceipt() {
+  const r = lastReceipt;
+  r.lines.forEach(initLine);
+  const opts = (sel) => `<option value="">${sel ? "Skip" : "Choose in Grocy…"}</option>` + lookups.products
     .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
-  const rows = r.lines.map((l, i) => `<li class="rline${l.is_food ? "" : " nonfood"}" data-i="${i}">
-      <div class="rtop"><strong>${esc(l.text)}</strong><span class="num">${eur(l.line_total_eur)}</span></div>
-      <div class="small muted">${esc(l.name_en)} · ${l.quantity} ${esc(l.unit)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}</div>
-      <select class="rprod" aria-label="Grocy product">${opts(l.product_id)}</select></li>`).join("");
+  const rows = r.lines.map((l, i) => {
+    const st = lineState(l);
+    const actions = [
+      !l.product ? `<button type="button" class="secondary" data-act="scan" data-i="${i}">Scan barcode</button>` : "",
+      l.product && !hasNutrition(l.product) ? `<button type="button" class="secondary" data-act="label" data-i="${i}">Photo of label</button>` : "",
+    ].join("");
+    return `<li class="rline${l.is_food ? "" : " nonfood"}${l.include ? "" : " off"}" data-i="${i}">
+      <div class="rtop"><label class="check"><input type="checkbox" class="rinc" data-i="${i}"${l.include ? " checked" : ""}>
+        <strong>${esc(l.text)}</strong></label><span class="num">${eur(l.line_total_eur)}</span></div>
+      <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
+      ${l.include ? `<div class="chips">${chipsHtml(l)}</div>
+      ${l.product ? amountHtml(l, i) : ""}
+      ${actions ? `<div class="ractions">${actions}</div>` : ""}
+      <select class="rprod" data-i="${i}" aria-label="Grocy product">${opts(l.product_id)}</select>` : ""}
+      ${l.include && needsPack(l) ? `<div class="small warn rhint"${st.why === "pack" ? "" : " hidden"}>How much is one pack? (e.g. 500 g of butter)</div>` : ""}</li>`;
+  }).join("");
+  const { ready, html: sumHtml } = summaryHtml(r);
   const sum = r.lines.reduce((a, l) => a + (l.line_total_eur || 0), 0);
   $("#receipt-result").innerHTML = `<div class="card">
     <h2>${esc(r.store || "Receipt")} ${r.date ? `<span class="badge">${esc(r.date)}</span>` : ""}</h2>
-    <p class="small muted">Receipt total ${eur(r.total_eur)} · lines ${eur(sum)}. Pick the Grocy product for each line,
-      or Skip. Products not in Grocy yet: scan their barcode first.</p>
+    <p class="small muted">Total ${eur(r.total_eur)} · lines ${eur(sum)}</p>
+    <div class="rsum">${sumHtml}</div>
     <ul class="list">${rows}</ul>
-    <button id="receipt-commit" type="button">Add chosen lines to stock</button></div>`;
-  on("#receipt-commit", "click", commitReceipt);
+    <button id="receipt-commit" type="button"${ready ? "" : " disabled"}>Add ${ready} ready line${ready === 1 ? "" : "s"} to stock</button>
+    <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p></div>`;
+}
+
+async function assignToLine(card) {
+  const l = lastReceipt.lines[receiptCtx];
+  receiptCtx = null;
+  Object.assign(l, { product_id: card.id, product: card, include: true, pack_size: null });
+  await refreshLookups();
+  renderReceipt();
+  show("receipt");
+  toast(`${card.name} linked to the receipt`);
 }
 
 async function commitReceipt() {
-  const lines = $$("#receipt-result .rline").map((li) => {
-    const l = lastReceipt.lines[Number(li.dataset.i)];
-    const id = Number(li.querySelector(".rprod").value);
-    return id ? { product_id: id, quantity: l.quantity, unit: l.unit, line_total_eur: l.line_total_eur } : null;
-  }).filter(Boolean);
-  if (!lines.length) return toast("Choose a Grocy product for at least one line");
+  const todo = lastReceipt.lines.filter((l) => l.include && lineState(l).ok && !l.done);
+  if (!todo.length) return toast("Nothing ready to add");
+  const lines = todo.map((l) => ({
+    product_id: l.product_id, quantity: l.quantity, unit: l.unit, line_total_eur: l.line_total_eur,
+    ...(COUNT_UNITS.includes(l.unit) && l.pack_size ? { pack_size: l.pack_size, pack_unit: l.pack_unit } : {}),
+  }));
   const r = await api("/receipts/commit", { method: "POST", json: { store: lastReceipt.store, lines }, busy: "Adding to stock…" });
-  const errors = r.lines.filter((l) => l.error);
-  $("#receipt-result").innerHTML = `<div class="card"><h2>${r.added} line(s) added to stock</h2>
+  r.lines.forEach((res, k) => { if (res.added) todo[k].done = true; });
+  const left = lastReceipt.lines.filter((l) => l.include && !l.done);
+  lastReceipt.lines = left;
+  const doneHtml = `<div class="card"><h2>${r.added} line(s) added to stock</h2>
     ${list(r.lines.map((l) => l.added ? esc(l.added) : `<span class="bad">${esc(l.error)}</span>`))}</div>`;
-  if (!errors.length) toast("Receipt added to stock");
+  if (left.length) { renderReceipt(); $("#receipt-result").insertAdjacentHTML("afterbegin", doneHtml); }
+  else $("#receipt-result").innerHTML = doneHtml;
+}
+
+function wireReceipt() {
+  const box = $("#receipt-result");
+  box.addEventListener("change", async (e) => {
+    const i = Number(e.target.dataset.i);
+    const l = lastReceipt?.lines[i];
+    if (!l) return;
+    try {
+      if (e.target.classList.contains("rinc")) l.include = e.target.checked;
+      if (e.target.classList.contains("rpack")) return;  // handled on "input"
+      if (e.target.classList.contains("rpunit")) { l.pack_unit = e.target.value; return updateReceiptLine(i); }
+      if (e.target.classList.contains("rprod")) {
+        const id = Number(e.target.value);
+        Object.assign(l, id ? { product_id: id, product: await api(`/products/${id}/card`), pack_size: null } : { product_id: null, product: null, include: false });
+      }
+      renderReceipt();
+    } catch (err) { toast(err.message, 6000); }
+  });
+  box.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("rpack")) return;
+    const i = Number(e.target.dataset.i);
+    lastReceipt.lines[i].pack_size = Number(e.target.value) || null;
+    updateReceiptLine(i);
+  });
+  box.addEventListener("click", async (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    try {
+      if (b.id === "receipt-commit") return await commitReceipt();
+      receiptCtx = Number(b.dataset.i);
+      const l = lastReceipt.lines[receiptCtx];
+      if (b.dataset.act === "scan") show("scan");
+      if (b.dataset.act === "label") {
+        $("#label-form [name=product_id]").value = String(l.product.id);
+        $("#label-form [name=barcode]").value = "";
+        show("label");
+      }
+    } catch (err) { toast(err.message, 6000); }
+  });
 }
 
 // --- wiring ------------------------------------------------------------------------------
@@ -198,7 +346,9 @@ function on(sel, ev, fn) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   $$("[data-go]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); show(b.dataset.go); }));
-  $("#back").addEventListener("click", () => show("home"));
+  $("#back").addEventListener("click", () => show(receiptCtx != null ? "receipt" : "home"));
+  $("#ctx-back").addEventListener("click", () => show("receipt"));
+  wireReceipt();
   window.addEventListener("popstate", () => show(location.hash.slice(1) || "home"));
 
   on("#login-form", "submit", async (e) => {
@@ -235,6 +385,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (f.img2.files[0]) fd.append("images", f.img2.files[0]);
     if (f.barcode.value) fd.append("barcode", f.barcode.value);
     const r = await api(`/products/${f.product_id.value}/label-photo`, { method: "POST", form: fd, busy: "Reading label…" });
+    if (receiptCtx != null) {
+      f.reset();
+      if (r.warnings.length) toast(r.warnings.join(" "), 6000);
+      return assignToLine(r.product);
+    }
     const n = r.product.nutrition_per_100 || {};
     $("#label-result").innerHTML = `<div class="card"><h2>${esc(r.product.name)} <span class="badge">${esc(r.status)}</span></h2>
       <p class="small">Per 100: ${n.kcal ?? "?"} kcal · P ${n.protein ?? "?"} · F ${n.fat ?? "?"} · C ${n.carbs ?? "?"} · salt ${n.salt ?? "?"}</p>
@@ -250,7 +405,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     fd.append("image", e.target.image.files[0]);
     fd.append("commit", "false");
     const r = await api("/receipts/photo", { method: "POST", form: fd, busy: "Reading receipt… (up to a minute)" });
-    renderReceipt(r);
+    lastReceipt = r;
+    renderReceipt();
     e.target.reset();
   });
   on("#produce-form", "submit", async (e) => {

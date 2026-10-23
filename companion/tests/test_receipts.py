@@ -78,3 +78,35 @@ async def test_commit_confirmed_lines(settings, catalog, fake_grocy):
     r = await receipts.commit_lines(svc, body)
     assert r["added"] == 1, r
     assert [c for c in fake_grocy.calls if c[0] == "add_stock"]
+
+
+@pytest.mark.asyncio
+async def test_preview_shows_product_card(settings, catalog, fake_grocy, tmp_path):
+    _seed(fake_grocy)
+    fake_grocy.uf[("products", 1)] = {"kcal_100": 41, "protein_100": 0.3, "fat_100": 0, "carbs_100": 3.5}
+    svc = make_services(settings, catalog, fake_grocy, [PARSED])
+    r = await receipts.import_photo(svc, b"jpg", "image/jpeg", False, str(tmp_path))
+    card = r["lines"][1]["product"]
+    assert card["name"] == "Alus Guinness" and card["stock_unit"] == "piece"
+    assert card["nutrition_per_100"]["kcal"] == 41
+    assert r["lines"][0]["product"] is None
+
+
+@pytest.mark.asyncio
+async def test_commit_uses_confirmed_pack_size(settings, catalog, fake_grocy):
+    # Butter kept in grams; the receipt says "1 pack"; the user confirms 1 pack = 500 g
+    fake_grocy.seed("products", {"id": 7, "name": "Sviestas", "qu_id_stock": QU["g"], "qu_id_purchase": QU["g"]})
+    svc = make_services(settings, catalog, fake_grocy)
+    body = receipts.ReceiptCommitIn(
+        store="Maxima",
+        lines=[
+            receipts.CommitLine(
+                product_id=7, quantity=1, unit="pack", line_total_eur=2.99, pack_size=500, pack_unit="g"
+            )
+        ],
+    )
+    r = await receipts.commit_lines(svc, body)
+    assert r["added"] == 1, r
+    add = next(c for c in fake_grocy.calls if c[0] == "add_stock")
+    assert add[1] == 7 and add[2] == 500
+    assert fake_grocy.uf[("products", 7)]["net_amount_per_pack"] == 500

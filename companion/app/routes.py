@@ -114,6 +114,11 @@ async def label_photo(
     return await products.label_photo(svc_of(request), pid, files, barcode)
 
 
+@router.get("/products/{product_id}/card")
+async def product_card(product_id: int, request: Request) -> dict[str, Any]:
+    return await receipts.product_card(svc_of(request), product_id)
+
+
 @router.post("/products/produce")
 async def produce(body: products.ProduceIn, request: Request) -> dict[str, Any]:
     return await products.add_produce(svc_of(request), body)

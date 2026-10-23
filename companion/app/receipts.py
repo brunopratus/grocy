@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 
 from .claude import compact_json, image_block
 from .deps import Services
-from .products import StockAddIn, add_stock
+from .products import StockAddIn, add_stock, summary
+from .units import UnitError, normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class CommitLine(BaseModel):
     quantity: float = Field(gt=0)
     unit: str
     line_total_eur: float | None = Field(None, ge=0)
+    pack_size: float | None = Field(None, gt=0, description="Net amount of one pack/piece, confirmed by the user")
+    pack_unit: str | None = Field(None, description="g or ml")
 
 
 class ReceiptCommitIn(BaseModel):
@@ -99,6 +102,7 @@ async def import_photo(
         row: dict[str, Any] = line.model_dump()
         if line.product_id not in known_ids:
             row["product_id"] = None
+        row["product"] = await product_card(svc, row["product_id"]) if row["product_id"] else None
         if commit and line.is_food and row["product_id"]:
             row.update(await _add_line(svc, CommitLine(**row), parsed.store))
         results.append(row)
@@ -116,8 +120,23 @@ async def import_photo(
     }
 
 
+async def product_card(svc: Services, product_id: int) -> dict[str, Any]:
+    """What the receipt checklist shows per product: stock unit, pack size and nutrition."""
+    product = await svc.grocy.object("products", product_id)
+    return summary(product, svc, await svc.grocy.userfields("products", product_id))
+
+
 async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[str, str]:
     try:
+        if line.pack_size:
+            # Remember the pack size the user confirmed ("1 pack of butter = 500 g") for next time
+            try:
+                pack_unit = normalize_unit(line.pack_unit or "g")
+            except UnitError:
+                pack_unit = "g"
+            await svc.grocy.set_userfields(
+                "products", line.product_id, {"net_amount_per_pack": line.pack_size, "net_unit": pack_unit}
+            )
         res = await add_stock(
             svc,
             StockAddIn(

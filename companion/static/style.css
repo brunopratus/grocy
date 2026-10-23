@@ -154,3 +154,25 @@ input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .rline select { margin-top: .5rem; min-height: 42px; padding-top: .5rem; padding-bottom: .5rem; font-size: .95rem; }
 .rline.nonfood strong { color: var(--muted); }
 #receipt-result .card > button { width: 100%; margin-top: .6rem; }
+
+/* Receipt checklist */
+.rsum { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin: .2rem 0 .6rem; font-size: .9rem; }
+.rsum b { color: var(--accent); font-size: 1.1rem; }
+.rline .rtop label.check { margin: 0; gap: .55rem; align-items: flex-start; font-size: .95rem; }
+.rline .rtop label.check input { margin-top: .15rem; }
+.rline.off strong { color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .5rem 0 .2rem; }
+.chip { font-family: var(--mono); font-size: .68rem; padding: .2rem .5rem; border-radius: 8px; border: 1px solid var(--line-strong); }
+.chip.ok { color: var(--accent); border-color: rgba(200, 241, 105, 0.35); background: var(--accent-soft); }
+.chip.warn { color: var(--warn); border-color: rgba(255, 200, 87, 0.4); background: rgba(255, 200, 87, 0.08); }
+.chip.bad { color: var(--bad); border-color: rgba(255, 122, 89, 0.45); background: rgba(255, 122, 89, 0.08); }
+.ramount { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .45rem; font-size: .9rem; }
+.ramount input { width: 5.5rem; min-height: 38px; margin: 0; padding: .35rem .6rem; }
+.ramount select { width: 4.6rem; min-height: 38px; margin: 0; padding: .35rem 1.6rem .35rem .6rem; background-position: right .55rem center; }
+.ractions { display: flex; gap: .5rem; margin-top: .5rem; }
+.ractions button { flex: 1; padding: .55rem .7rem; font-size: .9rem; }
+button:disabled { opacity: .45; cursor: default; }
+.ctx { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; margin-bottom: 1rem; padding: .7rem .9rem;
+  border: 1px solid rgba(200, 241, 105, 0.35); background: var(--accent-soft); border-radius: 14px; }
+.ctx strong { flex: 1 1 60%; }
+.ctx button { padding: .45rem .8rem; font-size: .85rem; }
