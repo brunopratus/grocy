@@ -114,6 +114,21 @@ class FakeGrocy(GrocyClient):
                 return await self.product_details(int(row["product_id"]))
         return None
 
+    async def stock(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "product_id": pid,
+                "product": self.tables["products"][pid],
+                "amount": amount,
+                "best_before_date": "2999-12-31",
+            }
+            for pid, amount in self.product_stock.items()
+            if amount > 0
+        ]
+
+    async def volatile(self, due_soon_days: int | None = None) -> dict[str, Any]:
+        return {"due_products": [], "overdue_products": [], "expired_products": [], "missing_products": []}
+
     async def add_stock(self, product_id: int, amount: float, **extra: Any) -> Any:
         self.calls.append(("add_stock", product_id, amount, extra))
         self.product_stock[product_id] = self.product_stock.get(product_id, 0) + amount

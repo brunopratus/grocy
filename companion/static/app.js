@@ -7,7 +7,7 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
-  cook: "Cook recipe", due: "Open / due", receipt: "Finish shopping", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
+  cook: "Cook recipe", stock: "Your stock", due: "Open / due", receipt: "Finish shopping", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
 };
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
@@ -49,6 +49,7 @@ function show(id) {
   if (id === "events") loadEvents();
   if (id === "home") loadHomeDue();
   if (id === "receipt") openFinishShopping();
+  if (id === "stock") loadStock();
   if (location.hash !== `#${id}` && id !== "login") history.pushState(null, "", `#${id}`);
 }
 
@@ -178,6 +179,7 @@ const hasNutrition = (card) => {
   return [n.kcal, n.protein, n.fat, n.carbs].every((v) => v != null);
 };
 const needsPack = (l) => COUNT_UNITS.includes(l.unit) && l.product && MASS_VOL.includes(l.product.stock_unit);
+const needsShelf = (card) => !Number(card?.default_best_before_days);
 const baseUnit = (u) => (u === "kg" || u === "g" ? "g" : u === "l" || u === "ml" ? "ml" : null);
 
 function initLine(l) {
@@ -191,6 +193,7 @@ function initLine(l) {
 
 function lineState(l) {
   if (!l.product) return { ok: false, why: "missing" };
+  if (l.shelf === "asking" || l.shelf === "question") return { ok: false, why: "shelf" };
   if (needsPack(l) && !l.pack_size) return { ok: false, why: "pack" };
   return { ok: true, why: hasNutrition(l.product) ? "" : "nutrition" };
 }
@@ -213,7 +216,44 @@ function chipsHtml(l) {
     l.product ? chip(true, "In Grocy") : chip(false, "Missing in Grocy"),
     l.product ? (hasNutrition(l.product) ? chip(true, "Nutrition") : chip(false, "No nutrition", true)) : "",
     l.product && needsPack(l) ? (l.pack_size ? chip(true, "Amount") : chip(false, "Pack size?")) : "",
+    l.product ? shelfChip(l) : "",
   ].join("");
+}
+
+function shelfChip(l) {
+  const days = Number(l.product.default_best_before_days);
+  if (!needsShelf(l.product)) return chip(true, days < 0 ? "No due date" : `Keeps ${days} d`);
+  if (l.shelf === "asking") return chip(false, "Shelf life: asking Claude…", true);
+  if (l.shelf === "question") return chip(false, "Shelf life: question", true);
+  return chip(false, "No shelf life", true);
+}
+
+function shelfQuestionHtml(l, i) {
+  if (l.shelf !== "question") return "";
+  return `<p class="small">${esc(l.shelf_q.question)}</p><div class="ropts">${l.shelf_q.options
+    .map((o) => `<button type="button" class="secondary" data-act="shelf" data-i="${i}" data-a="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+}
+
+// Products made by hand in Grocy have no shelf life: Claude suggests it (asking first if it must)
+async function askShelfLife(i, answer) {
+  const l = lastReceipt.lines[i];
+  l.shelf = "asking";
+  updateReceiptLine(i);
+  try {
+    const r = await api(`/products/${l.product.id}/shelf-life`, { method: "POST", json: answer ? { answer } : {} });
+    if (r.status === "question") Object.assign(l, { shelf: "question", shelf_q: r });
+    else Object.assign(l, { shelf: "saved", product: r.product });
+  } catch (err) {
+    l.shelf = "failed";
+    toast(`Shelf life for ${l.product.name}: ${err.message}`, 6000);
+  }
+  updateReceiptLine(i);
+}
+
+async function ensureShelfLife() {
+  for (const [i, l] of lastReceipt.lines.entries()) {
+    if (l.include && l.product && needsShelf(l.product) && !l.shelf) await askShelfLife(i);
+  }
 }
 
 function summaryHtml(r) {
@@ -227,8 +267,12 @@ function summaryHtml(r) {
 function updateReceiptLine(i) {
   const l = lastReceipt.lines[i];
   const li = $(`#receipt-result .rline[data-i="${i}"]`);
+  if (!li) return;
   li.querySelector(".chips").innerHTML = chipsHtml(l);
-  li.querySelector(".rtotal").innerHTML = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
+  const rq = li.querySelector(".rq");
+  if (rq) rq.innerHTML = shelfQuestionHtml(l, i);
+  const rtotal = li.querySelector(".rtotal");
+  if (rtotal) rtotal.innerHTML = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
   const hint = li.querySelector(".rhint");
   if (hint) hint.hidden = Boolean(l.pack_size) || !needsPack(l);
   const sum = summaryHtml(lastReceipt);
@@ -254,7 +298,7 @@ function renderReceipt() {
       <div class="rtop"><label class="check"><input type="checkbox" class="rinc" data-i="${i}"${l.include ? " checked" : ""}>
         <strong>${esc(l.text)}</strong></label><span class="num">${eur(l.line_total_eur)}</span></div>
       <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
-      ${l.include ? `<div class="chips">${chipsHtml(l)}</div>
+      ${l.include ? `<div class="chips">${chipsHtml(l)}</div><div class="rq">${shelfQuestionHtml(l, i)}</div>
       ${l.product ? amountHtml(l, i) : ""}
       ${actions ? `<div class="ractions">${actions}</div>` : ""}
       <select class="rprod" data-i="${i}" aria-label="Grocy product">${opts(l.product_id)}</select>` : ""}
@@ -270,6 +314,7 @@ function renderReceipt() {
     <button id="receipt-commit" type="button"${ready ? "" : " disabled"}>Add ${ready} ready line${ready === 1 ? "" : "s"} to stock</button>
     <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p></div>`;
   saveReceipt();
+  ensureShelfLife();
 }
 
 // The checklist survives closing the app (iPhone may also reload the page after using the camera)
@@ -283,6 +328,7 @@ function saveReceipt() {
 async function openFinishShopping() {
   if (!lastReceipt) {
     try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { lastReceipt = null; }
+    lastReceipt?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
     if (lastReceipt?.lines.length) renderReceipt();
   }
   try {
@@ -297,7 +343,7 @@ async function openFinishShopping() {
 async function assignToLine(card) {
   const l = lastReceipt.lines[receiptCtx];
   receiptCtx = null;
-  Object.assign(l, { product_id: card.id, product: card, include: true, pack_size: null });
+  Object.assign(l, { product_id: card.id, product: card, include: true, pack_size: null, shelf: null });
   await refreshLookups();
   renderReceipt();
   show("receipt");
@@ -333,7 +379,7 @@ function wireReceipt() {
       if (e.target.classList.contains("rpunit")) { l.pack_unit = e.target.value; return updateReceiptLine(i); }
       if (e.target.classList.contains("rprod")) {
         const id = Number(e.target.value);
-        Object.assign(l, id ? { product_id: id, product: await api(`/products/${id}/card`), pack_size: null } : { product_id: null, product: null, include: false });
+        Object.assign(l, id ? { product_id: id, product: await api(`/products/${id}/card`), pack_size: null, shelf: null } : { product_id: null, product: null, include: false });
       }
       renderReceipt();
     } catch (err) { toast(err.message, 6000); }
@@ -349,6 +395,7 @@ function wireReceipt() {
     if (!b) return;
     try {
       if (b.id === "receipt-commit") return await commitReceipt();
+      if (b.dataset.act === "shelf") return await askShelfLife(Number(b.dataset.i), b.dataset.a);
       receiptCtx = Number(b.dataset.i);
       const l = lastReceipt.lines[receiptCtx];
       if (b.dataset.act === "scan") show("scan");
@@ -359,6 +406,58 @@ function wireReceipt() {
       }
     } catch (err) { toast(err.message, 6000); }
   });
+}
+
+// --- recipe check (cook) -----------------------------------------------------------------------
+const NUTRIENT_ROWS = [["kcal", "Energy", "kcal"], ["protein", "Protein", "g"], ["fat", "Fat", "g"],
+  ["satfat", "of which saturates", "g"], ["carbs", "Carbohydrates", "g"], ["sugar", "of which sugars", "g"],
+  ["fiber", "Fibre", "g"], ["salt", "Salt", "g"]];
+
+function renderRecipeCheck(r) {
+  const missing = r.ingredients.filter((i) => !i.ok);
+  const rows = r.ingredients.map((i) => `<div class="ing ${i.ok ? "ok" : "no"}"><span class="mark">${i.ok ? "✓" : "✗"}</span>
+    <span><strong>${esc(i.name)}</strong><br><span class="small muted">need ${i.amount} ${esc(i.unit)} · have ${i.in_stock} ${esc(i.unit)}${i.ok ? "" : ` · <span class="bad">missing ${i.missing} ${esc(i.unit)}</span>`}</span></span></div>`).join("");
+  const table = NUTRIENT_ROWS.map(([k, label, u]) => `<tr${label.startsWith("of which") ? ' class="sub"' : ""}><td>${label}</td>
+    <td class="num">${r.total[k] ?? 0} ${u}</td><td class="num">${r.per_serving[k] ?? 0} ${u}</td></tr>`).join("");
+  $("#cook-result").innerHTML = `<div class="card">
+    <h2>${esc(r.recipe.name)} <span class="badge">${r.servings} servings</span></h2>
+    <div class="verdict ${r.all_in_stock ? "ok" : "no"}">${r.all_in_stock ? "✓ You have everything to cook this" : `✗ Missing ${missing.length} of ${r.ingredients.length} ingredients`}</div>
+    <h3>Ingredients</h3>${rows}
+    <h3>Nutrition</h3>
+    <table class="nut"><tr><th></th><th class="num">Total</th><th class="num">Per serving</th></tr>${table}</table>
+    ${r.missing_nutrition.length ? `<p class="small warn">No nutrition data yet for: ${esc(r.missing_nutrition.join(", "))}. The totals don't include them.</p>` : ""}
+    <div class="cost"><span>Cost</span><strong>${eur(r.cost_total_eur)}</strong><span class="muted small">${eur(r.cost_per_serving_eur)} per serving</span></div>
+    ${r.warnings?.length ? `<p class="small warn">${r.warnings.map(esc).join("<br>")}</p>` : ""}
+    ${r.created_products?.length ? `<p class="small muted">New in Grocy: ${esc(r.created_products.join(", "))}</p>` : ""}
+    <div class="ractions">
+      ${missing.length ? `<button type="button" class="secondary" data-act="shop" data-id="${r.recipe.id}">Add missing to shopping list</button>` : ""}
+      <button type="button" data-act="cook" data-id="${r.recipe.id}" data-servings="${r.servings}"${r.all_in_stock ? "" : ' class="secondary"'}>Cook now</button>
+    </div></div>`;
+}
+
+// --- stock list and quick search -----------------------------------------------------------
+let stockItems = [];
+
+async function loadStock() {
+  stockItems = await api("/stock/all");
+  renderStock();
+  $("#stock-q").focus();
+}
+
+function renderStock() {
+  const q = $("#stock-q").value.trim().toLowerCase();
+  const items = stockItems.filter((i) => !q || i.name.toLowerCase().includes(q));
+  const value = stockItems.reduce((a, i) => a + i.value_eur, 0);
+  $("#stock-sum").textContent = q ? `${items.length} of ${stockItems.length} products` : `${stockItems.length} products · ${eur(value)} total value`;
+  const groups = {};
+  for (const i of items) (groups[i.location || "No location"] ||= []).push(i);
+  $("#stock-list").innerHTML = Object.keys(groups).sort().map((loc) => `<div class="card"><h2>${esc(loc)}</h2>${list(groups[loc].map((i) => {
+    const d = i.days_left;
+    const cls = d == null ? "" : d < 0 ? "bad" : d <= 2 ? "warn" : "";
+    const when = d == null ? "" : d < 0 ? `${-d} d overdue` : d === 0 ? "due today" : `${d} d left`;
+    return `<div class="sitem"><strong>${esc(i.name)}</strong><span class="num">${esc(i.amount_text)}</span></div>
+      <div class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</div>`;
+  }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
 }
 
 // --- wiring ------------------------------------------------------------------------------
@@ -374,6 +473,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#back").addEventListener("click", () => show(receiptCtx != null ? "receipt" : "home"));
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
+  $("#stock-q").addEventListener("input", renderStock);
   window.addEventListener("popstate", () => show(location.hash.slice(1) || "home"));
 
   on("#login-form", "submit", async (e) => {
@@ -451,20 +551,38 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("#weigh-result").innerHTML = `<div class="card">${esc(r.message)}${r.notes?.length ? `<br><span class="small muted">${r.notes.map(esc).join(" ")}</span>` : ""}</div>`;
   });
 
-  on("#cook-nutrition", "click", async () => {
-    const id = $("#cook-form [name=recipe_id]").value;
-    const r = await api(`/recipes/${id}/nutrition`, { busy: "Calculating…" });
-    $("#cook-result").innerHTML = `<div class="card"><h2>${esc(r.recipe.name)} · ${r.servings} servings</h2>
-      <p>Per serving: ${nutritionLine(r.per_serving)}<br>Cost per serving: ${eur(r.cost_per_serving_eur)}</p>
-      ${list(r.ingredients.map((i) => `${esc(i.name)} <span class="muted small">${i.amount} ${esc(i.unit)} · ${i.kcal} kcal</span>`))}</div>`;
-  });
-  on("#cook-form", "submit", async (e) => {
+  on("#cook-pick", "submit", async (e) => {
     const f = e.target;
-    const body = f.servings.value ? { servings: Number(f.servings.value) } : {};
-    const r = await api(`/recipes/${f.recipe_id.value}/cook`, { method: "POST", json: body, busy: "Cooking…" });
-    $("#cook-result").innerHTML = `<div class="card"><h2>${esc(r.recipe.name)} · ${r.servings} servings</h2>
-      ${r.notices.length ? list(r.notices.map(esc)) : "<p>No partly used packs.</p>"}
-      <p>Per serving: ${nutritionLine(r.nutrition_per_serving)}<br>Cost per serving: ${eur(r.cost_per_serving_eur)}${r.cost_complete ? "" : " (some prices unknown)"}</p></div>`;
+    const q = f.servings.value ? `?servings=${Number(f.servings.value)}` : "";
+    renderRecipeCheck(await api(`/recipes/${f.recipe_id.value}/check${q}`, { busy: "Checking stock…" }));
+  });
+  on("#cook-import", "submit", async (e) => {
+    const f = e.target;
+    const fd = new FormData();
+    for (const k of ["url", "text", "servings"]) if (f[k].value.trim()) fd.append(k, f[k].value.trim());
+    if (f.file.files[0]) fd.append("file", f.file.files[0]);
+    if (!f.url.value.trim() && !f.text.value.trim() && !f.file.files[0]) return toast("Give a link, the text or a photo");
+    const r = await api("/recipes/import", { method: "POST", form: fd, busy: "Reading the recipe… (up to a minute)" });
+    f.reset();
+    await refreshLookups();
+    renderRecipeCheck(r);
+  });
+  $("#cook-result").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    try {
+      const id = b.dataset.id;
+      if (b.dataset.act === "shop") {
+        const r = await api(`/recipes/${id}/shopping-list`, { method: "POST", busy: "Adding…" });
+        toast(r.message);
+      }
+      if (b.dataset.act === "cook") {
+        if (!confirm("Cook now? The ingredients are taken out of stock.")) return;
+        const r = await api(`/recipes/${id}/cook`, { method: "POST", json: { servings: Number(b.dataset.servings) }, busy: "Cooking…" });
+        $("#cook-result").innerHTML = `<div class="card"><h2>Cooked: ${esc(r.recipe.name)}</h2>
+          ${r.notices.length ? list(r.notices.map(esc)) : "<p>Ingredients taken out of stock.</p>"}</div>`;
+      }
+    } catch (err) { toast(err.message, 6000); }
   });
 
   on("#due-refresh", "click", loadDue);

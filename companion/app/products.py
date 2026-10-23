@@ -127,6 +127,7 @@ def summary(product: dict[str, Any], svc: Services, uf: dict[str, Any] | None = 
         "stock_unit": svc.catalog.unit_of(product.get("qu_id_stock")),
         "default_best_before_days": product.get("default_best_before_days"),
         "default_best_before_days_after_open": product.get("default_best_before_days_after_open"),
+        "location": svc.catalog.location_name(product.get("location_id")),
     }
     if uf is not None:
         out["nutrition_per_100"] = Per100.from_userfields(uf).model_dump(exclude_none=True)
@@ -270,6 +271,70 @@ async def storage_advice(svc: Services, name: str, context: str | None = None) -
     except Exception as e:  # noqa: BLE001 - advice is optional
         log.warning("storage advice failed for %s: %s", name, e)
         return None
+
+
+class ShelfLifeAdvice(StorageAdvice):
+    question: str | None = Field(
+        None,
+        description="Only when the answer changes the shelf life a lot and can't be told from the name "
+        "(fresh or frozen? raw or cooked? opened already?): one short question for the household",
+    )
+    options: list[str] = Field(default_factory=list, description="2-4 short answers to the question")
+
+
+class ShelfLifeIn(BaseModel):
+    answer: str | None = Field(None, description="The household's answer to Claude's question")
+
+
+SHELF_LIFE_SYSTEM = (
+    "You are a food safety assistant for a household in Kaunas, Lithuania. From the product name (often "
+    "Lithuanian) give typical, conservative home storage values. If one fact you can't infer changes the "
+    "answer a lot, ask it as `question` with short `options` and still give your best values for the most "
+    "likely case; otherwise leave question empty. Non-food items: is_food=false, shelf life 0 if irrelevant."
+)
+
+
+def needs_shelf_life(product: dict[str, Any]) -> bool:
+    """Products made by hand in Grocy often have no default due days (0 = Grocy dates them today)."""
+    return int(product.get("default_best_before_days") or 0) == 0
+
+
+async def shelf_life(svc: Services, product_id: int, body: ShelfLifeIn) -> dict[str, Any]:
+    """Claude suggests shelf life and storage for a product; asks one question first when needed."""
+    product = await svc.grocy.object("products", product_id)
+    text = f"Product: {product['name']}"
+    if product.get("description"):
+        text += f"\nDescription: {product['description']}"
+    if body.answer:
+        text += f"\nThe household answered your question: {body.answer}. Do not ask again."
+    advice = await svc.claude.structured(
+        task="shelf_life",
+        schema=ShelfLifeAdvice,
+        cheap=True,
+        effort="low",
+        max_tokens=1500,
+        system=SHELF_LIFE_SYSTEM,
+        content=[{"type": "text", "text": text}],
+    )
+    if advice.question and not body.answer:
+        return {"status": "question", "question": advice.question, "options": advice.options[:4]}
+    changes: dict[str, Any] = {
+        # -1 = never overdue in Grocy (non-food, or no meaningful date)
+        "default_best_before_days": advice.shelf_life_unopened_days or -1,
+        "default_best_before_days_after_open": advice.shelf_life_after_opening_days,
+        "location_id": svc.catalog.location_id(advice.storage_location),
+    }
+    await svc.grocy.edit_object("products", product_id, changes)
+    svc.db.add_event(
+        "shelf_life",
+        f"{product['name']}: keeps {advice.shelf_life_unopened_days} d in {advice.storage_location}, "
+        f"{advice.shelf_life_after_opening_days} d after opening",
+        product_id=product_id,
+        product_name=product["name"],
+        data={**advice.model_dump(), "answer": body.answer},
+    )
+    product = await svc.grocy.object("products", product_id)
+    return {"status": "saved", "product": summary(product, svc, await svc.grocy.userfields("products", product_id))}
 
 
 async def _upload_picture(svc: Services, product_id: int, data: bytes, ext: str = "jpg") -> None:

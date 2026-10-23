@@ -300,3 +300,29 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
         "message": msg,
         "notes": notes,
     }
+
+
+async def inventory(svc: Services) -> list[dict[str, Any]]:
+    """Everything in stock, for the phone's inventory list and quick search."""
+    today = date.today()
+    items = []
+    for s in await svc.grocy.stock():
+        product = s["product"]
+        unit = svc.catalog.unit_of(product.get("qu_id_stock"))
+        amount = float(s.get("amount") or 0)
+        opened = float(s.get("amount_opened") or 0)
+        due = s.get("best_before_date")
+        days_left = (date.fromisoformat(due) - today).days if due and not due.startswith("2999") else None
+        items.append(
+            {
+                "product_id": int(s["product_id"]),
+                "name": product["name"],
+                "amount_text": fmt_amount(amount, unit),
+                "opened_text": fmt_amount(opened, unit) if opened else None,
+                "location": svc.catalog.location_name(product.get("location_id")),
+                "due": due if days_left is not None else None,
+                "days_left": days_left,
+                "value_eur": round(float(s.get("value") or 0), 2),
+            }
+        )
+    return sorted(items, key=lambda i: i["name"].lower())

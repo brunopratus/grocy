@@ -21,7 +21,7 @@ QUANTITY_UNITS = [  # (name, plural)
 ]
 CONVERSIONS = [("kg", "g", 1000.0), ("l", "ml", 1000.0)]
 LOCATIONS = [("Fridge", False), ("Freezer", True), ("Pantry", False)]
-SHOPPING_LOCATIONS = ["Maxima", "Rimi", "Lidl", "Norfa", "IKI", "Turgus"]
+SHOPPING_LOCATIONS = ["Maxima", "Rimi", "Lidl", "Norfa", "IKI", "Turgus", "Kaimas"]
 MEAL_SECTIONS = [("Breakfast", 1, "08:00"), ("Lunch", 2, "13:00"), ("Dinner", 3, "19:00")]
 
 NUMBER = "number-decimal"
@@ -82,6 +82,12 @@ class Catalog:
         if name and name.lower() in self.locations:
             return self.locations[name.lower()]
         return self.locations.get(default) or next(iter(self.locations.values()))
+
+    def location_name(self, location_id: Any) -> str | None:
+        for name, lid in self.locations.items():
+            if str(lid) == str(location_id):
+                return name.title()
+        return None
 
     def store_id(self, name: str | None) -> int | None:
         if not name:

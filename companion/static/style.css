@@ -177,3 +177,31 @@ button:disabled { opacity: .45; cursor: default; }
   border: 1px solid rgba(200, 241, 105, 0.35); background: var(--accent-soft); border-radius: 14px; }
 .ctx strong { flex: 1 1 60%; }
 .ctx button { padding: .45rem .8rem; font-size: .85rem; }
+
+/* Home quick search */
+.home-search { display: flex; align-items: center; gap: .7rem; width: 100%; margin-bottom: .8rem; padding: .85rem 1rem; text-align: left;
+  background: var(--surface-solid); color: var(--muted); border: 1px solid var(--line-strong); border-radius: 14px; font-weight: 500; }
+.home-search:hover { background: var(--surface-solid); border-color: rgba(200, 241, 105, 0.5); }
+.home-search .ic { color: var(--muted); }
+.search-card input { margin-top: 0; }
+.search-card p { margin: .5rem 0 0; }
+.sitem { display: flex; justify-content: space-between; gap: .8rem; }
+.sitem .num { white-space: nowrap; color: var(--strong); }
+
+/* Recipe check */
+.verdict { margin: .2rem 0 .4rem; padding: .7rem .9rem; border-radius: 12px; font-weight: 600; }
+.verdict.ok { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(200, 241, 105, 0.35); }
+.verdict.no { background: rgba(255, 122, 89, 0.08); color: var(--bad); border: 1px solid rgba(255, 122, 89, 0.4); }
+.ing { display: flex; gap: .65rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+.ing:last-of-type { border-bottom: 0; }
+.ing .mark { width: 1.2rem; flex-shrink: 0; font-weight: 700; }
+.ing.ok .mark { color: var(--accent); }
+.ing.no .mark { color: var(--bad); }
+table.nut td:first-child { color: var(--text); }
+table.nut tr.sub td:first-child { padding-left: 1rem; color: var(--muted); }
+.cost { display: flex; align-items: baseline; gap: .7rem; margin: 1rem 0 .4rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.cost strong { font-size: 1.4rem; color: var(--strong); }
+#cook-result .ractions { flex-wrap: wrap; margin-top: .8rem; }
+.rq p { margin: .5rem 0 .3rem; color: var(--warn); }
+.ropts { display: flex; flex-wrap: wrap; gap: .4rem; }
+.ropts button { padding: .45rem .8rem; font-size: .88rem; }

@@ -35,6 +35,7 @@
   <!-- Home -->
   <section id="home" class="panel" hidden>
     <div class="hello"><h2>Kitchen</h2><p id="home-sub">What do you want to do?</p></div>
+    <button type="button" class="home-search" data-go="stock"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/></svg><span>Search your stock…</span></button>
     <div class="grid">
       <button data-go="receipt" class="main wide"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h11.2L21 7H6M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg><span>Finish shopping<small>Receipt → checklist → stock</small></span></button>
       <button data-go="produce"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21c-4-4-6-8-6-12a6 6 0 0 1 12 0c0 4-2 8-6 12zM12 3v6"/></svg><span>Market produce<small>Loose fruit & veg</small></span></button>
@@ -123,15 +124,36 @@
 
   <!-- Cook -->
   <section id="cook" class="panel" hidden>
-    <form id="cook-form" class="card">
+    <form id="cook-pick" class="card">
+      <h2>From your recipes</h2>
+      <p class="small muted">Week plan recipes and recipes you imported before.</p>
       <label>Recipe<select name="recipe_id" class="recipes" required></select></label>
-      <label>Servings<input name="servings" type="number" min="1" step="1"></label>
       <div class="row">
-        <button type="button" id="cook-nutrition" class="secondary">Nutrition</button>
-        <button type="submit">Cook now</button>
+        <label>Servings<input name="servings" type="number" min="1" max="50" step="1" placeholder="as in recipe"></label>
+        <button type="submit">Check</button>
+      </div>
+    </form>
+    <form id="cook-import" class="card">
+      <h2>New recipe</h2>
+      <p class="small muted">A link, the recipe text or a photo. Claude reads it, saves it in Grocy and checks your stock.</p>
+      <label>Link<input name="url" type="url" inputmode="url" placeholder="https://…"></label>
+      <label>…or paste the recipe<textarea name="text" rows="4"></textarea></label>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>…or a photo of it<input name="file" type="file" accept="image/*"></label>
+      <div class="row">
+        <label>Servings<input name="servings" type="number" min="1" max="50" step="1" placeholder="as in recipe"></label>
+        <button type="submit">Analyse</button>
       </div>
     </form>
     <div id="cook-result"></div>
+  </section>
+
+  <!-- Stock -->
+  <section id="stock" class="panel" hidden>
+    <div class="card search-card">
+      <input id="stock-q" type="search" placeholder="Search your stock" autocomplete="off" aria-label="Search your stock">
+      <p id="stock-sum" class="small muted"></p>
+    </div>
+    <div id="stock-list"></div>
   </section>
 
   <!-- Open / due -->

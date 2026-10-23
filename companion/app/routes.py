@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from . import alerts, mealplan, products, receipts, reports, stock
+from . import alerts, mealplan, products, receipts, recipes, reports, stock
 from .deps import Services
 from .setup import run_setup
 
@@ -114,6 +114,11 @@ async def label_photo(
     return await products.label_photo(svc_of(request), pid, files, barcode)
 
 
+@router.post("/products/{product_id}/shelf-life")
+async def shelf_life(product_id: int, request: Request, body: products.ShelfLifeIn | None = None) -> dict[str, Any]:
+    return await products.shelf_life(svc_of(request), product_id, body or products.ShelfLifeIn())
+
+
 @router.get("/products/{product_id}/card")
 async def product_card(product_id: int, request: Request) -> dict[str, Any]:
     return await receipts.product_card(svc_of(request), product_id)
@@ -143,6 +148,36 @@ async def cook(recipe_id: int, request: Request, body: stock.CookIn | None = Non
     return await stock.cook(svc_of(request), recipe_id, body.servings if body else None)
 
 
+@router.post("/recipes/import")
+async def recipe_import(
+    request: Request,
+    url: str | None = Form(None),
+    text: str | None = Form(None),
+    servings: int | None = Form(None),
+    file: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    image = await _read(file) if file and file.filename else None
+    return await recipes.import_recipe(
+        svc_of(request),
+        url=(url or "").strip() or None,
+        text=(text or "").strip() or None,
+        image=image,
+        servings=servings,
+    )
+
+
+@router.get("/recipes/{recipe_id}/check")
+async def recipe_check(
+    recipe_id: int, request: Request, servings: int | None = Query(None, ge=1, le=50)
+) -> dict[str, Any]:
+    return await recipes.check(svc_of(request), recipe_id, servings)
+
+
+@router.post("/recipes/{recipe_id}/shopping-list")
+async def recipe_shopping_list(recipe_id: int, request: Request) -> dict[str, Any]:
+    return await recipes.missing_to_shopping_list(svc_of(request), recipe_id)
+
+
 @router.post("/stock/{product_id}/weigh")
 async def weigh(product_id: int, body: stock.WeighIn, request: Request) -> dict[str, Any]:
     return await stock.weigh(svc_of(request), product_id, body)
@@ -151,6 +186,11 @@ async def weigh(product_id: int, body: stock.WeighIn, request: Request) -> dict[
 @router.get("/events")
 async def events(request: Request, limit: int = Query(100, le=1000), kind: str | None = None) -> list[Any]:
     return svc_of(request).db.list_events(limit, kind)
+
+
+@router.get("/stock/all")
+async def stock_all(request: Request) -> list[dict[str, Any]]:
+    return await stock.inventory(svc_of(request))
 
 
 @router.get("/stock/open-due")
