@@ -78,6 +78,7 @@ def test_parse_quantity(text, expected):
 
 def test_fmt_amount():
     assert fmt_amount(1500, "g") == "1.5 kg"
+    assert fmt_amount(2, "Bottle") == "2 Bottle"  # hand-made Grocy unit
     assert fmt_amount(500, "g") == "500 g"
     assert fmt_amount(1, "piece") == "1 piece"
     assert fmt_amount(2, "pack") == "2 packs"

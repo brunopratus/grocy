@@ -198,7 +198,10 @@ def parse_quantity(text: str | None) -> tuple[float, str] | None:
 
 def fmt_amount(amount: float, unit: str) -> str:
     """Human friendly amount: 1500 g -> '1.5 kg', 500 g -> '500 g'."""
-    u = normalize_unit(unit) if unit else ""
+    try:
+        u = normalize_unit(unit) if unit else ""
+    except UnitError:  # a unit made in Grocy by hand ("Bottle", "Jar"): show it as it is
+        return f"{round(amount, 1):g} {unit}"
     if u == "g" and amount >= 1000:
         return f"{amount / 1000:g} kg"
     if u == "ml" and amount >= 1000:

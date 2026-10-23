@@ -38,7 +38,7 @@ async function api(path, { method = "GET", json, form, busy } = {}) {
 
 function show(id) {
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
-  $("#title").textContent = TITLES[id] || "Grocy+";
+  $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
   if (id !== "scan") stopScan();
   if (id === "due") loadDue();
