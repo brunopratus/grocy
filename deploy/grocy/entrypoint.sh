@@ -29,6 +29,15 @@ if [ ! -f "$DATA_DIR/config.php" ]; then
 	sed -i "s/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', true)/DefaultUserSetting('product_presets_treat_opened_as_out_of_stock', false)/" "$DATA_DIR/config.php"
 fi
 
+# Remove the design files an earlier version installed into the volume (Grocy includes
+# data/custom_css.html and custom_js.html on every page). Files written by hand are kept.
+for f in custom_css.html custom_js.html; do
+	if [ -f "$DATA_DIR/$f" ] && grep -q "grocy-plus-theme" "$DATA_DIR/$f"; then
+		rm -f "$DATA_DIR/$f"
+		echo "[grocy+] Removed data/$f (Grocy's original look restored)"
+	fi
+done
+
 # Before a new Grocy version migrates the database, keep a full snapshot of the old state.
 # (Apache isn't running yet, so nothing can trigger the migrations before this.)
 version="$(php -r 'echo json_decode(file_get_contents("/var/www/html/version.json"))->Version;')"
