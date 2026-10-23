@@ -120,6 +120,13 @@ async def import_photo(
     }
 
 
+async def inbox(svc: Services) -> dict[str, Any]:
+    """Receipts waiting to be checked, from automatic sources (e-mail in a later phase; none yet).
+
+    "Finish shopping" in the app shows these first and falls back to a photo of the paper receipt."""
+    return {"receipts": [], "sources": []}
+
+
 async def product_card(svc: Services, product_id: int) -> dict[str, Any]:
     """What the receipt checklist shows per product: stock unit, pack size and nutrition."""
     product = await svc.grocy.object("products", product_id)

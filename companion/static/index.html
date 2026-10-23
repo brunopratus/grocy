@@ -36,15 +36,13 @@
   <section id="home" class="panel" hidden>
     <div class="hello"><h2>Kitchen</h2><p id="home-sub">What do you want to do?</p></div>
     <div class="grid">
-      <button data-go="scan" class="main"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg><span>Scan barcode<small>Packaged food</small></span></button>
-      <button data-go="label"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9zM8 8h.01"/></svg><span>Nutrition label<small>Photo of the label</small></span></button>
+      <button data-go="receipt" class="main wide"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h11.2L21 7H6M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg><span>Finish shopping<small>Receipt → checklist → stock</small></span></button>
       <button data-go="produce"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21c-4-4-6-8-6-12a6 6 0 0 1 12 0c0 4-2 8-6 12zM12 3v6"/></svg><span>Market produce<small>Loose fruit & veg</small></span></button>
       <button data-go="weigh"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M5 21h14l-2-12H7zM9 6h6"/></svg><span>Weigh item<small>Update what's left</small></span></button>
       <button data-go="cook"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16v2a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7zM8 3c0 2 2 2 2 4M12 3c0 2 2 2 2 4M16 3c0 2 2 2 2 4"/></svg><span>Cook recipe<small>Use ingredients</small></span></button>
       <button data-go="due"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 9v4l2 2M9 2h6"/></svg><span>Open / due<small>Use these first</small></span></button>
       <button data-go="plan"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg><span>Week plan<small>Meals & shopping</small></span></button>
       <button data-go="report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Weekly report<small>Food, money, waste</small></span></button>
-      <button data-go="receipt" class="wide"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/></svg><span>Shop receipt<small>Photo of the receipt: everything into stock at once</small></span></button>
     </div>
     <div id="home-due" class="card"></div>
     <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" id="logout">Log out</a></p>
@@ -167,8 +165,9 @@
 
   <!-- Receipt -->
   <section id="receipt" class="panel" hidden>
+    <div id="receipt-inbox" class="card"></div>
     <form id="receipt-form" class="card">
-      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Photo of the whole receipt<input name="image" type="file" accept="image/*" capture="environment" required></label>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Scan the paper receipt<input name="image" type="file" accept="image/*" capture="environment" required></label>
       <button type="submit">Read receipt</button>
     </form>
     <div id="receipt-result"></div>

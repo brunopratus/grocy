@@ -237,6 +237,11 @@ async def receipt_photo(request: Request, image: UploadFile = File(...), commit:
     return await receipts.import_photo(svc, data, mt, commit, str(Path(svc.settings.db_path).parent))
 
 
+@router.get("/receipts/inbox")
+async def receipt_inbox(request: Request) -> dict[str, Any]:
+    return await receipts.inbox(svc_of(request))
+
+
 @router.post("/receipts/commit")
 async def receipt_commit(request: Request, body: receipts.ReceiptCommitIn) -> dict[str, Any]:
     return await receipts.commit_lines(svc_of(request), body)

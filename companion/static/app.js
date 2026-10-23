@@ -7,7 +7,7 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
-  cook: "Cook recipe", due: "Open / due", receipt: "Shop receipt", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
+  cook: "Cook recipe", due: "Open / due", receipt: "Finish shopping", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
 };
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
@@ -48,6 +48,7 @@ function show(id) {
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
   if (id === "home") loadHomeDue();
+  if (id === "receipt") openFinishShopping();
   if (location.hash !== `#${id}` && id !== "login") history.pushState(null, "", `#${id}`);
 }
 
@@ -235,6 +236,7 @@ function updateReceiptLine(i) {
   const btn = $("#receipt-commit");
   btn.disabled = !sum.ready;
   btn.textContent = `Add ${sum.ready} ready line${sum.ready === 1 ? "" : "s"} to stock`;
+  saveReceipt();
 }
 
 function renderReceipt() {
@@ -267,6 +269,29 @@ function renderReceipt() {
     <ul class="list">${rows}</ul>
     <button id="receipt-commit" type="button"${ready ? "" : " disabled"}>Add ${ready} ready line${ready === 1 ? "" : "s"} to stock</button>
     <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p></div>`;
+  saveReceipt();
+}
+
+// The checklist survives closing the app (iPhone may also reload the page after using the camera)
+function saveReceipt() {
+  try {
+    if (lastReceipt?.lines.length) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
+    else localStorage.removeItem("gp-receipt");
+  } catch { /* storage blocked: the checklist just isn't kept */ }
+}
+
+async function openFinishShopping() {
+  if (!lastReceipt) {
+    try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { lastReceipt = null; }
+    if (lastReceipt?.lines.length) renderReceipt();
+  }
+  try {
+    const r = await api("/receipts/inbox");
+    $("#receipt-inbox").innerHTML = `<h2>Receipts waiting</h2>` + (r.receipts.length
+      ? list(r.receipts.map((x) => `${esc(x.store || "Receipt")} ${esc(x.date || "")} <span class="muted small">${eur(x.total_eur)}</span>`))
+      : `<p class="small muted">None waiting${lastReceipt?.lines.length ? "" : ": scan the paper receipt below"}.
+         Receipts from e-mail will appear here in a later phase.</p>`);
+  } catch (err) { $("#receipt-inbox").innerHTML = ""; }
 }
 
 async function assignToLine(card) {
@@ -293,7 +318,7 @@ async function commitReceipt() {
   const doneHtml = `<div class="card"><h2>${r.added} line(s) added to stock</h2>
     ${list(r.lines.map((l) => l.added ? esc(l.added) : `<span class="bad">${esc(l.error)}</span>`))}</div>`;
   if (left.length) { renderReceipt(); $("#receipt-result").insertAdjacentHTML("afterbegin", doneHtml); }
-  else $("#receipt-result").innerHTML = doneHtml;
+  else { $("#receipt-result").innerHTML = doneHtml; saveReceipt(); }
 }
 
 function wireReceipt() {

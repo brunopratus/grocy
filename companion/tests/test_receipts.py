@@ -110,3 +110,9 @@ async def test_commit_uses_confirmed_pack_size(settings, catalog, fake_grocy):
     add = next(c for c in fake_grocy.calls if c[0] == "add_stock")
     assert add[1] == 7 and add[2] == 500
     assert fake_grocy.uf[("products", 7)]["net_amount_per_pack"] == 500
+
+
+@pytest.mark.asyncio
+async def test_inbox_is_empty_until_email_receipts(settings, catalog, fake_grocy):
+    svc = make_services(settings, catalog, fake_grocy)
+    assert await receipts.inbox(svc) == {"receipts": [], "sources": []}
