@@ -355,15 +355,24 @@ def parse_fineli_food(food: dict[str, Any]) -> FoodCandidate:
     )
 
 
-async def fineli_search(http: httpx.AsyncClient, queries: list[str], limit: int = 8) -> list[FoodCandidate]:
-    """Search Fineli with each query (Finnish first works best), merged and de-duplicated."""
+async def fineli_search(
+    http: httpx.AsyncClient, queries: list[str], limit: int = 8, user_agent: str = "GrocyPlus-Companion/0.1"
+) -> list[FoodCandidate]:
+    """Search Fineli with each query (Finnish first works best), merged and de-duplicated.
+
+    Fineli answers 403 to clients without a browser-like Accept header and a named User-Agent."""
     seen: set[str] = set()
     out: list[FoodCandidate] = []
     for q in queries:
         if not q or len(out) >= limit:
             continue
         try:
-            resp = await http.get(FINELI_URL, params={"q": q}, timeout=20.0)
+            resp = await http.get(
+                FINELI_URL,
+                params={"q": q},
+                headers={"User-Agent": user_agent, "Accept": "application/json", "Accept-Language": "en,fi;q=0.8"},
+                timeout=20.0,
+            )
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, ValueError) as e:

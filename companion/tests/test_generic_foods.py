@@ -71,6 +71,7 @@ async def test_fineli_search_merges_queries():
         found = await fineli_search(http, ["porkkana", "carrot"])
     assert [c.ref for c in found] == ["11060", "11061"]
     assert route.calls[0].request.url.params["q"] == "porkkana"
+    assert route.calls[0].request.headers["user-agent"].startswith("GrocyPlus")  # Fineli 403s python-httpx
 
 
 @pytest.mark.asyncio

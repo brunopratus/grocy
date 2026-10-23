@@ -507,7 +507,9 @@ async def food_candidates(svc: Services, english: str, finnish: str | None = Non
     jobs: list[Awaitable[list[Any]]] = []
     for source in svc.settings.generic_food_sources:
         if source == "fineli":
-            jobs.append(fineli_search(svc.http, [q for q in (finnish, english) if q]))
+            jobs.append(
+                fineli_search(svc.http, [q for q in (finnish, english) if q], user_agent=svc.settings.off_user_agent)
+            )
         elif source == "usda":
             jobs.append(usda_search(svc.http, english, svc.settings.usda_fdc_api_key))
     results = await asyncio.gather(*jobs)
