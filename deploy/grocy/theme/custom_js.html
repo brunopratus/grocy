@@ -1,0 +1,27 @@
+<!-- grocy-plus-theme: "Night Pantry" design, installed by deploy/grocy/entrypoint.sh on every start; edits here are overwritten. -->
+<script>
+	// Status counters ("4 products are due within the next 5 days"): show the number large on its own line.
+	// Grocy rewrites these texts after every stock change, so re-apply whenever they change.
+	(function () {
+		function splitCounter(el) {
+			if (el.querySelector(".np-n")) return;
+			var m = /^\s*(\d+)\s+([\s\S]*)$/.exec(el.textContent);
+			if (!m) return;
+			el.textContent = "";
+			var n = document.createElement("span");
+			n.className = "np-n";
+			n.textContent = m[1];
+			el.appendChild(n);
+			el.appendChild(document.createTextNode(m[2]));
+		}
+		function apply() {
+			document.querySelectorAll(".status-filter-message .d-none.d-md-block").forEach(splitCounter);
+		}
+		document.addEventListener("DOMContentLoaded", function () {
+			apply();
+			document.querySelectorAll(".status-filter-message").forEach(function (box) {
+				new MutationObserver(apply).observe(box, { childList: true, subtree: true });
+			});
+		});
+	})();
+</script>

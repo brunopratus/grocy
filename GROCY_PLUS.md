@@ -317,6 +317,13 @@ secret `SYNC_TOKEN` (contents, pull requests, workflows: read/write) and the wor
   task, logged per call), and the Console's Usage page.
 * Open Food Facts, Fineli, USDA FDC and ntfy.sh are free (Fineli needs no key).
 
+## Design ("Night Pantry")
+Grocy's own pages use a dark Grocy+ design: `deploy/grocy/theme/custom_css.html` and `custom_js.html`
+are copied to `data/` on every start (Grocy includes those files on every page; no Grocy file is
+changed). It is always dark, so Grocy's own night-mode setting has no visible effect.
+`GROCY_PLUS_THEME=off` on the grocy service restores Grocy's original look. Your own
+`data/custom_css.html` / `custom_js.html` (without the `grocy-plus-theme` marker) are never overwritten.
+
 ## Backups
 
 Two layers protect the Grocy volume (`/var/www/html/data`: database, photos, config):
