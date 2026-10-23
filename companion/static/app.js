@@ -7,7 +7,7 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
-  cook: "Cook recipe", due: "Open / due", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
+  cook: "Cook recipe", due: "Open / due", receipt: "Shop receipt", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
 };
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
@@ -152,6 +152,42 @@ async function lookupCode(code) {
   }
 }
 
+// --- receipt -------------------------------------------------------------------------------
+const RECEIPT_UNITS = ["piece", "pack", "g", "kg", "ml", "l"];
+let lastReceipt = null;
+
+function renderReceipt(r) {
+  lastReceipt = r;
+  const opts = (sel) => `<option value="">Skip</option>` + lookups.products
+    .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+  const rows = r.lines.map((l, i) => `<li class="rline${l.is_food ? "" : " nonfood"}" data-i="${i}">
+      <div class="rtop"><strong>${esc(l.text)}</strong><span class="num">${eur(l.line_total_eur)}</span></div>
+      <div class="small muted">${esc(l.name_en)} · ${l.quantity} ${esc(l.unit)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}</div>
+      <select class="rprod" aria-label="Grocy product">${opts(l.product_id)}</select></li>`).join("");
+  const sum = r.lines.reduce((a, l) => a + (l.line_total_eur || 0), 0);
+  $("#receipt-result").innerHTML = `<div class="card">
+    <h2>${esc(r.store || "Receipt")} ${r.date ? `<span class="badge">${esc(r.date)}</span>` : ""}</h2>
+    <p class="small muted">Receipt total ${eur(r.total_eur)} · lines ${eur(sum)}. Pick the Grocy product for each line,
+      or Skip. Products not in Grocy yet: scan their barcode first.</p>
+    <ul class="list">${rows}</ul>
+    <button id="receipt-commit" type="button">Add chosen lines to stock</button></div>`;
+  on("#receipt-commit", "click", commitReceipt);
+}
+
+async function commitReceipt() {
+  const lines = $$("#receipt-result .rline").map((li) => {
+    const l = lastReceipt.lines[Number(li.dataset.i)];
+    const id = Number(li.querySelector(".rprod").value);
+    return id ? { product_id: id, quantity: l.quantity, unit: l.unit, line_total_eur: l.line_total_eur } : null;
+  }).filter(Boolean);
+  if (!lines.length) return toast("Choose a Grocy product for at least one line");
+  const r = await api("/receipts/commit", { method: "POST", json: { store: lastReceipt.store, lines }, busy: "Adding to stock…" });
+  const errors = r.lines.filter((l) => l.error);
+  $("#receipt-result").innerHTML = `<div class="card"><h2>${r.added} line(s) added to stock</h2>
+    ${list(r.lines.map((l) => l.added ? esc(l.added) : `<span class="bad">${esc(l.error)}</span>`))}</div>`;
+  if (!errors.length) toast("Receipt added to stock");
+}
+
 // --- wiring ------------------------------------------------------------------------------
 function on(sel, ev, fn) {
   $(sel).addEventListener(ev, async (e) => {
@@ -209,6 +245,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     refreshLookups();
   });
 
+  on("#receipt-form", "submit", async (e) => {
+    const fd = new FormData();
+    fd.append("image", e.target.image.files[0]);
+    fd.append("commit", "false");
+    const r = await api("/receipts/photo", { method: "POST", form: fd, busy: "Reading receipt… (up to a minute)" });
+    renderReceipt(r);
+    e.target.reset();
+  });
   on("#produce-form", "submit", async (e) => {
     const body = formJson(e.target, ["weight_g", "count", "price_eur"]);
     const r = await api("/products/produce", { method: "POST", json: body, busy: "Adding produce…" });

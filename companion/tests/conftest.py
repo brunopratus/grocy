@@ -108,6 +108,17 @@ class FakeGrocy(GrocyClient):
             "last_price": 0,
         }
 
+    async def product_by_barcode(self, barcode: str) -> dict[str, Any] | None:
+        for row in self.tables.get("product_barcodes", {}).values():
+            if row["barcode"] == barcode:
+                return await self.product_details(int(row["product_id"]))
+        return None
+
+    async def add_stock(self, product_id: int, amount: float, **extra: Any) -> Any:
+        self.calls.append(("add_stock", product_id, amount, extra))
+        self.product_stock[product_id] = self.product_stock.get(product_id, 0) + amount
+        return [{"transaction_id": "tx-add"}]
+
     async def inventory(self, product_id: int, new_amount: float, **extra: Any) -> Any:
         self.calls.append(("inventory", product_id, new_amount))
         return [{"transaction_id": "tx-inv"}]

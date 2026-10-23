@@ -44,6 +44,18 @@ class ReceiptParse(BaseModel):
     lines: list[ReceiptLine]
 
 
+class CommitLine(BaseModel):
+    product_id: int
+    quantity: float = Field(gt=0)
+    unit: str
+    line_total_eur: float | None = Field(None, ge=0)
+
+
+class ReceiptCommitIn(BaseModel):
+    store: str | None = None
+    lines: list[CommitLine]
+
+
 class ReceiptSource(Protocol):
     """Interface for automatic receipt sources (IMAP e-receipts, Lidl Plus...). Not implemented yet."""
 
@@ -53,9 +65,12 @@ class ReceiptSource(Protocol):
 
 
 SYSTEM = """You read Lithuanian supermarket receipts (Maxima, Rimi, Lidl, Norfa, IKI). Lines are usually
-Lithuanian and abbreviated. Weighed items show a weight like '0,734 kg x 2,49'. Apply line discounts
-('Nuolaida') to the line they belong to. Skip deposit (užstatas), bags and payment lines.
-Map lines to catalog products by product_id only when it is clearly the same food."""
+Lithuanian and abbreviated. Weighed items show a weight like '0,734 kg x 2,49'; repeated items show
+'2,35 X 2 vnt.' under the name (quantity 2). Discount lines ('Nuolaida', 'AČIŪ nuolaida prekei: …')
+belong to the item they name or the item just above: subtract them from that line, never list them.
+Skip deposits ('užstatas', 'Skardinė (depozitinė)', 'Depozitas/įmoka'), shopping bags ('maišas'),
+totals, VAT, loyalty card and payment lines. Pet food, cleaning and other non-food: is_food=false.
+Map lines to catalog products by product_id only when it is clearly the same product."""
 
 
 async def import_photo(
@@ -78,25 +93,14 @@ async def import_photo(
             {"type": "text", "text": f"Product catalog: {compact_json(catalog)}\nParse this receipt."},
         ],
     )
-    results: list[dict[str, Any]] = []
     known_ids = {c["id"] for c in catalog}
+    results: list[dict[str, Any]] = []
     for line in parsed.lines:
         row: dict[str, Any] = line.model_dump()
-        if commit and line.is_food and line.product_id in known_ids:
-            try:
-                res = await add_stock(
-                    svc,
-                    StockAddIn(
-                        product_id=line.product_id,
-                        amount=line.quantity,
-                        unit=line.unit,
-                        price_total=line.line_total_eur,
-                        store=parsed.store,
-                    ),
-                )
-                row["added"] = res["message"]
-            except Exception as e:  # noqa: BLE001 - report per line
-                row["error"] = str(e)
+        if line.product_id not in known_ids:
+            row["product_id"] = None
+        if commit and line.is_food and row["product_id"]:
+            row.update(await _add_line(svc, CommitLine(**row), parsed.store))
         results.append(row)
     try:
         purchase_date = date.fromisoformat(parsed.date) if parsed.date else None
@@ -110,3 +114,28 @@ async def import_photo(
         "committed": commit,
         "original": original.name,
     }
+
+
+async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[str, str]:
+    try:
+        res = await add_stock(
+            svc,
+            StockAddIn(
+                product_id=line.product_id,
+                amount=line.quantity,
+                unit=line.unit,
+                price_total=line.line_total_eur,
+                store=store,
+            ),
+        )
+        return {"added": res["message"]}
+    except Exception as e:  # noqa: BLE001 - report per line
+        return {"error": str(e)}
+
+
+async def commit_lines(svc: Services, body: ReceiptCommitIn) -> dict[str, Any]:
+    """Add the lines the user confirmed after a preview (no second Claude call)."""
+    results = [{"product_id": line.product_id, **await _add_line(svc, line, body.store)} for line in body.lines]
+    added = sum(1 for r in results if "added" in r)
+    svc.db.add_event("receipt", f"Receipt from {body.store or 'unknown store'}: {added} line(s) added to stock")
+    return {"added": added, "lines": results}

@@ -63,6 +63,7 @@ strong { color: var(--strong); font-weight: 600; }
 .grid button.main span, .grid button.main small { color: var(--accent-text); }
 .grid button.main small { opacity: .7; }
 .grid button.main .ic { background: rgba(10, 12, 11, 0.12); color: var(--accent-text); }
+.grid button.wide { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: flex-start; gap: .9rem; min-height: 0; }
 .ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 #home-due h2 { display: flex; align-items: center; gap: .5rem; }
 #home-due h2::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(255, 200, 87, 0.15); }
@@ -146,3 +147,10 @@ td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .card > .row + .row { margin-top: .6rem; }
 input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
+/* Receipt lines */
+.rline .rtop { display: flex; justify-content: space-between; gap: .8rem; }
+.rline .rtop .num { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--strong); }
+.rline select { margin-top: .5rem; min-height: 42px; padding-top: .5rem; padding-bottom: .5rem; font-size: .95rem; }
+.rline.nonfood strong { color: var(--muted); }
+#receipt-result .card > button { width: 100%; margin-top: .6rem; }

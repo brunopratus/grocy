@@ -162,6 +162,20 @@ def net_of(uf: dict[str, Any]) -> tuple[float | None, str | None]:
     return net, (uf.get("net_unit") or None)
 
 
+async def link_barcode(svc: Services, product_id: int, barcode: str, qu_id: int) -> str | None:
+    """Attach ``barcode`` to the product unless Grocy already has it. Returns a warning, if any."""
+    found = await svc.grocy.product_by_barcode(barcode)
+    if found:
+        owner = found["product"]
+        if int(owner["id"]) == product_id:
+            return None
+        return f"Barcode {barcode} already belongs to '{owner['name']}' in Grocy; not added again."
+    await svc.grocy.add_object(
+        "product_barcodes", {"product_id": product_id, "barcode": barcode, "qu_id": qu_id, "amount": 1}
+    )
+    return None
+
+
 async def create_product(svc: Services, spec: NewProduct) -> dict[str, Any]:
     cat = svc.catalog
     stock_unit = normalize_unit(spec.stock_unit)
@@ -209,10 +223,8 @@ async def create_product(svc: Services, spec: NewProduct) -> dict[str, Any]:
         uf["net_unit"] = spec.net_unit or ""
     if uf:
         await svc.grocy.set_userfields("products", pid, uf)
-    if spec.barcode:
-        await svc.grocy.add_object(
-            "product_barcodes", {"product_id": pid, "barcode": spec.barcode, "qu_id": purchase_qu, "amount": 1}
-        )
+    if spec.barcode and (warning := await link_barcode(svc, pid, spec.barcode, purchase_qu)):
+        log.warning(warning)
     svc.db.add_event(
         "created",
         f"Created product '{name}'",
@@ -429,16 +441,10 @@ async def label_photo(
             changes["default_best_before_days"] = ext.shelf_life_unopened_days
         if changes:
             await svc.grocy.edit_object("products", int(product["id"]), changes)
-        if barcode:
-            await svc.grocy.add_object(
-                "product_barcodes",
-                {
-                    "product_id": int(product["id"]),
-                    "barcode": barcode,
-                    "amount": 1,
-                    "qu_id": int(product["qu_id_purchase"]),
-                },
-            )
+        if barcode and (
+            warning := await link_barcode(svc, int(product["id"]), barcode, int(product["qu_id_purchase"]))
+        ):
+            warnings.append(warning)
 
     pid = int(product["id"])
     # Store the nutrition table photo in the label_photo userfield, the front photo as product picture

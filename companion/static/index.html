@@ -43,6 +43,7 @@
       <button data-go="due"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 9v4l2 2M9 2h6"/></svg><span>Open / due<small>Use these first</small></span></button>
       <button data-go="plan"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg><span>Week plan<small>Meals & shopping</small></span></button>
       <button data-go="report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Weekly report<small>Food, money, waste</small></span></button>
+      <button data-go="receipt" class="wide"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/></svg><span>Shop receipt<small>Photo of the receipt: everything into stock at once</small></span></button>
     </div>
     <div id="home-due" class="card"></div>
     <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" id="logout">Log out</a></p>
@@ -161,6 +162,15 @@
       <button type="submit">Generate plan</button>
     </form>
     <div id="plan-result"></div>
+  </section>
+
+  <!-- Receipt -->
+  <section id="receipt" class="panel" hidden>
+    <form id="receipt-form" class="card">
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Photo of the whole receipt<input name="image" type="file" accept="image/*" capture="environment" required></label>
+      <button type="submit">Read receipt</button>
+    </form>
+    <div id="receipt-result"></div>
   </section>
 
   <!-- Report -->

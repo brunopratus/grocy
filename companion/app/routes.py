@@ -232,6 +232,11 @@ async def receipt_photo(request: Request, image: UploadFile = File(...), commit:
     return await receipts.import_photo(svc, data, mt, commit, str(Path(svc.settings.db_path).parent))
 
 
+@router.post("/receipts/commit")
+async def receipt_commit(request: Request, body: receipts.ReceiptCommitIn) -> dict[str, Any]:
+    return await receipts.commit_lines(svc_of(request), body)
+
+
 @router.get("/bank/matches")
 async def bank_matches() -> dict[str, Any]:
     raise HTTPException(501, "Phase 5 (bank link) is not implemented yet")
