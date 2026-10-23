@@ -30,6 +30,7 @@ RUN apt-get update \
 	&& docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
 	&& docker-php-ext-install -j"$(nproc)" gd intl \
 	&& a2enmod rewrite \
+	&& (a2dismod -f mpm_event mpm_worker || true) && a2enmod mpm_prefork \
 	&& echo "ServerName localhost" > /etc/apache2/conf-available/servername.conf && a2enconf servername \
 	&& rm -rf /var/lib/apt/lists/*
 

@@ -44,6 +44,12 @@ rm -rf "$DATA_DIR/viewcache/"*
 
 chown -R www-data:www-data "$DATA_DIR"
 
+# mod_php needs exactly one MPM, prefork ("More than one MPM loaded" otherwise)
+for mpm in event worker; do
+	rm -f "/etc/apache2/mods-enabled/mpm_${mpm}.load" "/etc/apache2/mods-enabled/mpm_${mpm}.conf"
+done
+[ -e /etc/apache2/mods-enabled/mpm_prefork.load ] || a2enmod -q mpm_prefork
+
 # Apache on Railway's $PORT
 echo "Listen ${PORT}" > /etc/apache2/ports.conf
 
