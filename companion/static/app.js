@@ -8,17 +8,7 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
   cook: "Cook recipe", due: "Open / due", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
-  theme: "Appearance",
 };
-
-// Designs (styles live in style.css under [data-theme="…"]). Swatches: background, surface/accent, highlight.
-const THEMES = [
-  { id: "ledger", name: "Nordic Ledger", desc: "Calm and editorial, light", sw: ["#FBFBFA", "#111111", "#EDF3EC"] },
-  { id: "bento", name: "Soft Bento", desc: "Rounded and friendly, light", sw: ["#ECEEE9", "#1F4D3A", "#D9F26B"] },
-  { id: "night", name: "Night Pantry", desc: "Dark, easy on the eyes", sw: ["#0A0C0B", "#131614", "#C8F169"] },
-  { id: "label", name: "Label Print", desc: "Bold, like a food label", sw: ["#F2F1EC", "#111111", "#E61919"] },
-  { id: "native", name: "Native", desc: "Looks like an iPhone app", sw: ["#F2F2F7", "#FFFFFF", "#1E7B3A"] },
-];
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
 // --- plumbing -----------------------------------------------------------------
@@ -46,39 +36,15 @@ async function api(path, { method = "GET", json, form, busy } = {}) {
   }
 }
 
-function applyTheme(id) {
-  if (!THEMES.some((t) => t.id === id)) id = "ledger";
-  document.documentElement.dataset.theme = id;
-  try { localStorage.setItem("gp-theme", id); } catch { /* storage blocked: theme lasts this visit */ }
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-  if (bg) $('meta[name="theme-color"]').setAttribute("content", bg);
-  renderThemes();
-}
-
-function renderThemes() {
-  const current = document.documentElement.dataset.theme;
-  $("#theme-list").innerHTML = THEMES.map((t) => `
-    <button type="button" class="theme-opt" data-theme-id="${t.id}" aria-pressed="${t.id === current}">
-      <span class="theme-sw" aria-hidden="true">${t.sw.map((c) => `<span style="background:${c}"></span>`).join("")}</span>
-      <span><span class="theme-name">${esc(t.name)}</span><span class="theme-desc">${esc(t.desc)}</span></span>
-      <svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>
-    </button>`).join("");
-}
-
-// "#/scan" style addresses: they never match an element id, so the browser doesn't scroll to them
-const currentPanel = () => location.hash.replace(/^#\/?/, "") || "home";
-
 function show(id) {
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
-  document.body.dataset.panel = id;
-  window.scrollTo(0, 0);
   $("#title").textContent = TITLES[id] || "Grocy+";
   $("#back").hidden = id === "home" || id === "login";
   if (id !== "scan") stopScan();
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
   if (id === "home") loadHomeDue();
-  if (location.hash !== `#/${id}` && id !== "login") history.pushState(null, "", `#/${id}`);
+  if (location.hash !== `#${id}` && id !== "login") history.pushState(null, "", `#${id}`);
 }
 
 function formJson(form, numeric = []) {
@@ -122,30 +88,22 @@ function nutritionLine(n) {
 // --- due list ---------------------------------------------------------------------
 function dueItem(i) {
   const d = i.days_left;
-  const lvl = d == null ? "lvl-ok" : d <= 0 ? "lvl-bad" : d <= 1 ? "lvl-warn" : "lvl-ok";
-  const when = d == null ? "No date" : d < 0 ? `${-d} d over` : d === 0 ? "Today" : d === 1 ? "1 day" : `${d} days`;
-  const detail = [i.opened ? "Opened" : "", `${esc(i.amount_text)}${i.opened ? " left" : ""}`, i.due ? `until ${esc(i.due)}` : ""]
-    .filter(Boolean).join(" · ");
-  return `<li class="due-row"><div class="due-main"><span class="due-name">${esc(i.name)}</span>
-    <span class="due-detail">${detail}</span></div><span class="due-when ${lvl}">${when}</span></li>`;
-}
-
-function dueBlock(items, title) {
-  const head = `<div class="due-head"><h2>${esc(title)}</h2><span class="due-count">${items.length} item${items.length === 1 ? "" : "s"}</span></div>`;
-  return head + (items.length ? `<ul class="due-rows">${items.map(dueItem).join("")}</ul>`
-    : `<p class="due-empty">Nothing opened or due. Well done.</p>`);
+  const cls = d == null ? "" : d <= 0 ? "bad" : d <= 1 ? "warn" : "";
+  const when = d == null ? "no due date" : d < 0 ? `${-d} d overdue` : d === 0 ? "today" : `${d} d left`;
+  return `<strong>${esc(i.name)}</strong> ${i.opened ? '<span class="badge">opened</span>' : ""}<br>
+    <span class="small">${esc(i.amount_text)} · <span class="${cls}">${when}</span>${i.due ? ` (${esc(i.due)})` : ""}</span>`;
 }
 
 async function loadDue() {
   const days = $("#due-days").value || 3;
   const items = await api(`/stock/open-due?days=${days}`);
-  $("#due-list").innerHTML = `<div class="card due-card">${dueBlock(items, "Opened and due")}</div>`;
+  $("#due-list").innerHTML = `<div class="card">${items.length ? list(items.map(dueItem)) : "Nothing opened or due. 👍"}</div>`;
 }
 
 async function loadHomeDue() {
   try {
     const items = await api("/stock/open-due");
-    $("#home-due").innerHTML = dueBlock(items.slice(0, 6), "Use these first");
+    $("#home-due").innerHTML = items.length ? `<h2>Use these first</h2>${list(items.slice(0, 6).map(dueItem))}` : "";
   } catch { /* not logged in yet */ }
 }
 
@@ -177,7 +135,7 @@ async function lookupCode(code) {
     const n = p.nutrition_per_100;
     html += `<p class="small muted">Per 100: ${n.kcal} kcal · P ${n.protein ?? "?"} · F ${n.fat ?? "?"} · C ${n.carbs ?? "?"}</p>`;
   }
-  if (r.needs_label_photo) html += `<button id="go-label" class="secondary">Photo of nutrition table</button>`;
+  if (r.needs_label_photo) html += `<button id="go-label" class="secondary">📸 Photo of nutrition table</button>`;
   html += "</div>";
   $("#scan-result").innerHTML = html;
   $("#go-label")?.addEventListener("click", async () => {
@@ -203,16 +161,9 @@ function on(sel, ev, fn) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  applyTheme(document.documentElement.dataset.theme);
-  $("#theme-list").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-theme-id]");
-    if (b) applyTheme(b.dataset.themeId);
-  });
-  $("#today").textContent = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
-
   $$("[data-go]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); show(b.dataset.go); }));
   $("#back").addEventListener("click", () => show("home"));
-  window.addEventListener("popstate", () => show(currentPanel()));
+  window.addEventListener("popstate", () => show(location.hash.slice(1) || "home"));
 
   on("#login-form", "submit", async (e) => {
     await api("/login", { method: "POST", json: { token: e.target.token.value } });
@@ -342,7 +293,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   try {
     await refreshLookups();
-    show(currentPanel());
+    show(location.hash.slice(1) || "home");
   } catch {
     show("login");
   }

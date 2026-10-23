@@ -3,62 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#FBFBFA">
+  <meta name="theme-color" content="#2f6f4f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Grocy+">
-  <script>
-    // Apply the saved theme before first paint (no flash). Themes live in style.css.
-    (function () {
-      var t = null;
-      try { t = localStorage.getItem("gp-theme"); } catch (e) { /* storage blocked */ }
-      if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "ledger";
-      document.documentElement.dataset.theme = t;
-    })();
-  </script>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Geist:wght@400;500;600&family=Geist+Mono:wght@500&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Newsreader:opsz,wght@6..72,500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
   <title>Grocy+</title>
 </head>
 <body>
-<!-- Icon set (stroke icons, inherit currentColor) -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 9v6M11 9v6M14 9v6M17 9v6"/></symbol>
-    <symbol id="i-label" viewBox="0 0 24 24"><path d="M3 12V4h8l9 9-8 8-9-9zM7.5 7.5h.01"/></symbol>
-    <symbol id="i-produce" viewBox="0 0 24 24"><path d="M5 19C5 10 10 5 19 5c0 9-5 14-14 14zM5 19l7-7"/></symbol>
-    <symbol id="i-weigh" viewBox="0 0 24 24"><path d="M12 4v16M8 20h8M5 8h14M7 8l-3 6a3 3 0 0 0 6 0L7 8M17 8l-3 6a3 3 0 0 0 6 0l-3-6"/></symbol>
-    <symbol id="i-cook" viewBox="0 0 24 24"><path d="M4 10h16v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-5zM2 10h20M9 6.5c0-1 1-1.2 1-2.5M14 6.5c0-1 1-1.2 1-2.5"/></symbol>
-    <symbol id="i-due" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></symbol>
-    <symbol id="i-plan" viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></symbol>
-    <symbol id="i-report" viewBox="0 0 24 24"><path d="M5 20V11M12 20V5M19 20v-7M3 20h18"/></symbol>
-    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
-    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
-    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></symbol>
-    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></symbol>
-    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></symbol>
-    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.5-.8 1.5-1.6 0-1.4-1.1-1.6-1.1-2.9 0-1 .8-1.5 1.8-1.5H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3zM7.5 11h.01M10 7.5h.01M14.5 7.5h.01"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
-  </defs>
-</svg>
-
-<header id="topbar">
-  <button id="back" class="icon-btn" hidden aria-label="Back"><svg class="ic"><use href="#i-back"/></svg></button>
+<header>
+  <button id="back" class="icon" hidden aria-label="Back">←</button>
   <h1 id="title">Grocy+</h1>
-  <button class="icon-btn" data-go="theme" aria-label="Appearance"><svg class="ic"><use href="#i-palette"/></svg></button>
 </header>
 
 <main>
   <!-- Login -->
   <section id="login" class="panel" hidden>
-    <div class="hero">
-      <p class="eyebrow">Household · Kaunas</p>
-      <p class="hero-title">Grocy<span class="plus">+</span></p>
-    </div>
     <form id="login-form" class="card">
       <label>Companion token<input type="password" name="token" autocomplete="current-password" required></label>
       <button type="submit">Log in</button>
@@ -67,31 +29,18 @@
 
   <!-- Home -->
   <section id="home" class="panel" hidden>
-    <div class="hero">
-      <p class="eyebrow" id="today">Today</p>
-      <p class="hero-title">Grocy<span class="plus">+</span></p>
+    <div class="grid">
+      <button data-go="scan">📷<span>Scan barcode</span></button>
+      <button data-go="label">🏷️<span>Nutrition label</span></button>
+      <button data-go="produce">🥕<span>Market produce</span></button>
+      <button data-go="weigh">⚖️<span>Weigh item</span></button>
+      <button data-go="cook">🍳<span>Cook recipe</span></button>
+      <button data-go="due">⏰<span>Open / due</span></button>
+      <button data-go="plan">🗓️<span>Week plan</span></button>
+      <button data-go="report">📊<span>Weekly report</span></button>
     </div>
-    <div id="home-due" class="card due-card"></div>
-    <nav class="tiles" aria-label="Actions">
-      <button class="tile tile-primary" data-go="scan" data-n="01"><span class="tile-ic"><svg class="ic"><use href="#i-scan"/></svg></span><span class="tile-text"><span class="tile-label">Scan barcode</span><span class="tile-hint">Add shopping with price and store</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="label" data-n="02"><span class="tile-ic"><svg class="ic"><use href="#i-label"/></svg></span><span class="tile-text"><span class="tile-label">Nutrition label</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="produce" data-n="03"><span class="tile-ic"><svg class="ic"><use href="#i-produce"/></svg></span><span class="tile-text"><span class="tile-label">Market produce</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="weigh" data-n="04"><span class="tile-ic"><svg class="ic"><use href="#i-weigh"/></svg></span><span class="tile-text"><span class="tile-label">Weigh item</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="cook" data-n="05"><span class="tile-ic"><svg class="ic"><use href="#i-cook"/></svg></span><span class="tile-text"><span class="tile-label">Cook recipe</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="due" data-n="06"><span class="tile-ic"><svg class="ic"><use href="#i-due"/></svg></span><span class="tile-text"><span class="tile-label">Open / due</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="plan" data-n="07"><span class="tile-ic"><svg class="ic"><use href="#i-plan"/></svg></span><span class="tile-text"><span class="tile-label">Week plan</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-      <button class="tile" data-go="report" data-n="08"><span class="tile-ic"><svg class="ic"><use href="#i-report"/></svg></span><span class="tile-text"><span class="tile-label">Weekly report</span></span><svg class="ic tile-chev"><use href="#i-chevron"/></svg></button>
-    </nav>
-    <p class="foot"><a href="#" data-go="events">History</a> · <a href="#" data-go="theme">Appearance</a> · <a href="#" id="logout">Log out</a></p>
-  </section>
-
-  <!-- Appearance -->
-  <section id="theme" class="panel" hidden>
-    <div class="card">
-      <h2>Design</h2>
-      <p class="muted small">Saved on this phone only. Each person can pick their own.</p>
-      <div id="theme-list" class="theme-list"></div>
-    </div>
+    <div id="home-due" class="card"></div>
+    <p class="muted small"><a href="#" data-go="events">History</a> · <a href="#" id="logout">Log out</a></p>
   </section>
 
   <!-- Scan -->
@@ -103,7 +52,7 @@
         <button id="scan-stop" class="secondary">Stop</button>
       </div>
       <form id="manual-code" class="row">
-        <label class="grow">Barcode<input name="code" inputmode="numeric" placeholder="or type it"></label>
+        <input name="code" inputmode="numeric" placeholder="or type the barcode">
         <button type="submit" class="secondary">Look up</button>
       </form>
     </div>
@@ -121,7 +70,7 @@
         <label>Store<select name="store" class="stores"></select></label>
       </div>
       <label>Best before<input name="best_before" type="date"></label>
-      <label class="file"><svg class="ic"><use href="#i-camera"/></svg><span>Read date from photo</span><input id="due-photo" type="file" accept="image/*" capture="environment"></label>
+      <label class="file">📸 Read date from photo<input id="due-photo" type="file" accept="image/*" capture="environment"></label>
       <button type="submit">Add</button>
     </form>
   </section>
@@ -131,8 +80,8 @@
     <form id="label-form" class="card">
       <label>Product<select name="product_id" class="products"><option value="new">New product</option></select></label>
       <label>Barcode (optional)<input name="barcode" inputmode="numeric"></label>
-      <label class="file"><svg class="ic"><use href="#i-camera"/></svg><span>Nutrition table</span><input name="img1" type="file" accept="image/*" capture="environment" required></label>
-      <label class="file"><svg class="ic"><use href="#i-camera"/></svg><span>Front / net weight (optional)</span><input name="img2" type="file" accept="image/*" capture="environment"></label>
+      <label class="file">📸 Nutrition table<input name="img1" type="file" accept="image/*" capture="environment" required></label>
+      <label class="file">📸 Front / net weight (optional)<input name="img2" type="file" accept="image/*" capture="environment"></label>
       <button type="submit">Read label</button>
     </form>
     <div id="label-result"></div>
@@ -192,7 +141,7 @@
   <!-- Week plan -->
   <section id="plan" class="panel" hidden>
     <form id="plan-form" class="card">
-      <label class="file"><svg class="ic"><use href="#i-file"/></svg><span>Weekly plan (PDF / text / photo)</span><input name="file" type="file" accept=".pdf,.txt,.md,image/*"></label>
+      <label class="file">📄 Weekly plan (PDF / text / photo)<input name="file" type="file" accept=".pdf,.txt,.md,image/*"></label>
       <label>…or paste it<textarea name="text" rows="4"></textarea></label>
       <div class="row">
         <label>Week starts<input name="week_start" type="date"></label>
