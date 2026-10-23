@@ -17,6 +17,6 @@ COPY static ./static
 
 # Runs as root: Railway mounts volumes owned by root, so a non-root user could not write /data
 RUN mkdir -p /data
-VOLUME /data
+# Data lives in /data: attach a Railway volume there (Railway rejects the VOLUME instruction)
 EXPOSE 8000
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]

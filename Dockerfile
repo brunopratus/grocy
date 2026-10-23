@@ -53,7 +53,7 @@ ENV PORT=8080 \
 	GROCY_ENERGY_UNIT=kcal \
 	TZ=Europe/Vilnius
 
-VOLUME /var/www/html/data
+# Data lives in /var/www/html/data: attach a Railway volume there (Railway rejects the VOLUME instruction)
 EXPOSE 8080
 ENTRYPOINT ["grocy-entrypoint"]
 CMD ["apache2-foreground"]
