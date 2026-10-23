@@ -1,0 +1,56 @@
+<!-- grocy-plus-theme: installed by deploy/grocy/entrypoint.sh on every start; edits here are overwritten. -->
+<script>
+  // Adds a "Design" chooser to Grocy's "View settings" menu (the sliders icon, top right).
+  (function () {
+    var THEMES = [
+      ["ledger", "Nordic Ledger", ["#FBFBFA", "#111111", "#EDF3EC"]],
+      ["bento", "Soft Bento", ["#ECEEE9", "#1F4D3A", "#D9F26B"]],
+      ["night", "Night Pantry", ["#0A0C0B", "#131614", "#C8F169"]],
+      ["label", "Label Print", ["#F2F1EC", "#111111", "#E61919"]],
+      ["native", "Native", ["#F2F2F7", "#FFFFFF", "#1E7B3A"]],
+      ["off", "Grocy original", ["#FFFFFF", "#337AB7", "#F8F9FA"]]
+    ];
+    function current() { return document.documentElement.getAttribute("data-gp-theme"); }
+    function setTheme(id) {
+      document.documentElement.setAttribute("data-gp-theme", id);
+      try { localStorage.setItem("gp-grocy-theme", id); } catch (e) { /* storage blocked: lasts this page */ }
+    }
+    function build() {
+      var toggle = document.querySelector("#mainNav .fa-sliders-h");
+      var menu = toggle && toggle.closest(".nav-item") && toggle.closest(".nav-item").querySelector(".dropdown-menu");
+      if (!menu || menu.querySelector(".gp-theme-picker")) return;
+      var box = document.createElement("div");
+      box.className = "gp-theme-picker";
+      var title = document.createElement("div");
+      title.className = "gp-title";
+      title.textContent = "Design (Grocy+)";
+      box.appendChild(title);
+      THEMES.forEach(function (t) {
+        var label = document.createElement("label");
+        var input = document.createElement("input");
+        input.type = "radio";
+        input.name = "gp-theme";
+        input.value = t[0];
+        input.checked = current() === t[0];
+        input.addEventListener("change", function () { setTheme(t[0]); });
+        var sw = document.createElement("span");
+        sw.className = "gp-sw";
+        sw.setAttribute("aria-hidden", "true");
+        t[2].forEach(function (c) { var s = document.createElement("span"); s.style.background = c; sw.appendChild(s); });
+        var name = document.createElement("span");
+        name.textContent = t[1];
+        label.appendChild(input);
+        label.appendChild(sw);
+        label.appendChild(name);
+        box.appendChild(label);
+      });
+      // Keep the menu open while choosing
+      box.addEventListener("click", function (e) { e.stopPropagation(); });
+      var divider = document.createElement("div");
+      divider.className = "dropdown-divider";
+      menu.insertBefore(divider, menu.firstChild);
+      menu.insertBefore(box, menu.firstChild);
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build); else build();
+  })();
+</script>

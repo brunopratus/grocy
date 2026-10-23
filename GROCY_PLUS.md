@@ -193,6 +193,22 @@ volume have a few seconds of downtime on each deploy.
 The Hobby plan ($5/month, which includes $5 of usage) normally covers both services and volumes for a
 household; Railway bills any usage above that. See **Workspace → Usage** in Railway.
 
+## Designs
+
+The five Grocy+ designs (Nordic Ledger, Soft Bento, Night Pantry, Label Print, Native) are available in
+two places:
+
+* **Grocy's own website** (the `grocy` service): the start script installs `deploy/grocy/theme/custom_css.html`
+  and `custom_js.html` into Grocy's data folder; Grocy includes them on every page, so no Grocy file is
+  changed. Default design: Railway variable `GROCY_PLUS_THEME` = `ledger` (default), `bento`, `night`,
+  `label`, `native` or `off` (Grocy's original look). Each browser can switch under **View settings**
+  (sliders icon, top right) → *Design (Grocy+)*. Tip: leave Grocy's own "Night mode" off and use Night
+  Pantry for a dark look.
+* **The companion**: the palette icon (top right) → Appearance. Styles in `companion/static/style.css`.
+
+Each design is one block of colour/font variables at the top of those files, so tweaks are small edits.
+The Grocy phone apps keep their own look.
+
 ## Getting the keys and secrets
 
 | Variable | Where it comes from | Cost |
