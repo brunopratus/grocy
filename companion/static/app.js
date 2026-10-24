@@ -3,6 +3,8 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Decimal input in either notation: "4,93" (Lithuanian keypad) or "4.93"
+const num = (v) => Number(String(v ?? "").replace(/\s/g, "").replace(",", "."));
 const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
@@ -87,7 +89,7 @@ function formJson(form, numeric = []) {
   const out = {};
   for (const [k, v] of new FormData(form).entries()) {
     if (v instanceof File || v === "") continue;
-    out[k] = numeric.includes(k) ? Number(v) : v;
+    out[k] = numeric.includes(k) ? num(v) : v;
   }
   return out;
 }
@@ -253,7 +255,7 @@ function amountHtml(l, i) {
   const total = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
   const units = ["g", "ml"].map((u) => `<option${u === l.pack_unit ? " selected" : ""}>${u}</option>`).join("");
   return `<div class="ramount">${l.quantity} ${esc(l.unit)} ×
-    <input class="rpack" data-i="${i}" type="number" inputmode="decimal" min="0" step="any" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
+    <input class="rpack" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
     <select class="rpunit" data-i="${i}">${units}</select> <span class="rtotal">${total}</span></div>`;
 }
 
@@ -449,7 +451,7 @@ function wireReceipt() {
   box.addEventListener("input", (e) => {
     if (!e.target.classList.contains("rpack")) return;
     const i = Number(e.target.dataset.i);
-    lastReceipt.lines[i].pack_size = Number(e.target.value) || null;
+    lastReceipt.lines[i].pack_size = num(e.target.value) || null;
     updateReceiptLine(i);
   });
   box.addEventListener("click", async (e) => {
@@ -658,7 +660,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
   on("#credit-form", "submit", async (e) => {
-    await api("/usage/credit", { method: "POST", json: { balance_usd: Number(e.target.balance_usd.value) } });
+    await api("/usage/credit", { method: "POST", json: { balance_usd: num(e.target.balance_usd.value) } });
     e.target.reset();
     toast("Balance saved");
     await loadUsage();
@@ -711,7 +713,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const fd = new FormData();
     fd.append("images", f.img1.files[0]);
     if (f.barcode.value) fd.append("barcode", f.barcode.value);
-    if (Number(f.net_amount.value) > 0) { fd.append("net_amount", f.net_amount.value); fd.append("net_unit", f.net_unit.value); }
+    if (num(f.net_amount.value) > 0) { fd.append("net_amount", String(num(f.net_amount.value))); fd.append("net_unit", f.net_unit.value); }
     const r = await api(`/products/${f.product_id.value}/label-photo`, { method: "POST", form: fd, busy: "Reading label…" });
     if (!r.pack_size && ["g", "ml"].includes(r.product.stock_unit)) r.warnings.push("Pack size isn't printed on the label: type it in \"Pack size\" next time, or on the receipt line.");
     if (receiptCtx != null) {
@@ -749,8 +751,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   on("#weigh-form", "submit", async (e) => {
     const f = e.target;
-    const body = { grams_measured: Number(f.grams_measured.value), includes_container: f.includes_container.checked };
-    if (f.container_g.value) body.container_g = Number(f.container_g.value);
+    const body = { grams_measured: num(f.grams_measured.value), includes_container: f.includes_container.checked };
+    if (f.container_g.value) body.container_g = num(f.container_g.value);
     const r = await api(`/stock/${f.product_id.value}/weigh`, { method: "POST", json: body, busy: "Saving…" });
     $("#weigh-result").innerHTML = `<div class="card">${esc(r.message)}${r.notes?.length ? `<br><span class="small muted">${r.notes.map(esc).join(" ")}</span>` : ""}</div>`;
   });
@@ -795,7 +797,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const f = e.target;
     const fd = new FormData();
     if (f.file.files[0]) fd.append("file", f.file.files[0]);
-    for (const k of ["text", "week_start", "kcal_target", "budget_eur", "people", "preferences"]) if (f[k].value) fd.append(k, f[k].value);
+    for (const k of ["text", "week_start", "kcal_target", "budget_eur", "people", "preferences"]) {
+      if (f[k].value) fd.append(k, k === "budget_eur" ? String(num(f[k].value)) : f[k].value);
+    }
     fd.append("dry_run", f.dry_run.checked ? "true" : "false");
     const r = await api("/mealplan/generate", { method: "POST", form: fd, busy: "Planning the week… (up to a few minutes)" });
     const s = r.summary;
