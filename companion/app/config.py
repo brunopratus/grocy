@@ -32,6 +32,7 @@ class Settings:
     alert_due_days: int
     off_user_agent: str
     version: str = "dev"
+    testing: bool = True
     bug_github_repo: str = ""
     bug_github_token: str = ""
 
@@ -64,6 +65,8 @@ def get_settings() -> Settings:
         off_user_agent=env("OFF_USER_AGENT", "GrocyPlus-Companion/0.1 (self-hosted household app)"),
         # Railway sets the deployed commit; shown in the app and attached to bug reports
         version=(env("RAILWAY_GIT_COMMIT_SHA") or env("GIT_COMMIT") or "dev")[:7],
+        # Test phase: bug icon on every screen. TESTING=false for production (the home screen link stays).
+        testing=_bool(env("TESTING"), True),
         bug_github_repo=env("BUG_GITHUB_REPO", ""),
         bug_github_token=env("BUG_GITHUB_TOKEN", ""),
     )

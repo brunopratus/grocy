@@ -166,6 +166,10 @@ The built-in snapshots (before upgrades and daily at 03:00) run on their own; no
    use the public address instead: `GROCY_URL=https://<grocy-domain>`.
    Optional: `HOUSEHOLD_PEOPLE=2`, `ALERT_HOUR=8`, `ALERT_DUE_DAYS=3`, `GENERIC_FOOD_SOURCES=fineli,usda`,
    `CLAUDE_FALLBACKS=true`.
+   Bug reports: `BUG_GITHUB_REPO=<owner>/<private repo>` and `BUG_GITHUB_TOKEN=<fine-grained token, that repo
+   only, Issues + Contents read/write>` turn each in-app report into a GitHub issue (see *Bug reports*).
+   `TESTING=true` (default) shows the bug icon on every screen during the test phase; `TESTING=false` for
+   production keeps only the *Report a bug* link on the home screen.
 4. **Settings → Networking → Generate Domain** (port **8000** if asked) = `<companion-domain>`.
 5. **Deploy**. Build takes 1–2 minutes. In the logs look for
    `setup done: {'changes': [...], 'warnings': [], 'ok': True}` — the companion has created units,
@@ -389,6 +393,12 @@ loses only history (Grocy holds all household data); a weekly Railway backup is 
 `GENERIC_FOOD_SOURCES` (default `fineli,usda`) chooses which generic sources are searched.
 `GET /nutrition/search?q=carrot&fi=porkkana` shows what each source returns — useful to check values.
 
+## Bug reports
+The bug icon (test phase) or *Report a bug* on the home screen sends: the description, an automatic screenshot,
+the last steps and API calls in the app, the error messages, device, app version, the open receipt checklist and
+the server's recent log lines. Reports are kept in the companion (`GET /bugs`) and, when `BUG_GITHUB_*` is set,
+filed as issues labelled `bug-report` in the bugs repository, which a coding session can read and fix.
+
 ## Roadmap
 
 * **Phase 4 — receipts:** `POST /receipts/photo` already parses a receipt photo with Claude, maps
@@ -417,6 +427,11 @@ loses only history (Grocy holds all household data); a weekly Railway backup is 
     before publishing it.
   * **Quality:** a review step (household confirms Claude's reading), duplicate detection per barcode,
     and recording the source and date of every value.
+* **Phase 7 — other households (future, not started).** A separate installation per household (Grocy is
+  single-household): its own Railway project with the grocy + companion services and volumes, its own
+  Anthropic key, built from this same repository so improvements reach everyone. Make it a Railway template
+  (one-click deploy with a short form for the keys and household settings) plus a setup guide; first use:
+  a cousin's household.
 
 ## Local development
 

@@ -90,6 +90,7 @@ async def lookups(request: Request) -> dict[str, Any]:
         "locations": sorted(svc.catalog.locations, key=str.lower),
         "people": svc.settings.people,
         "version": svc.settings.version,
+        "testing": svc.settings.testing,
     }
 
 

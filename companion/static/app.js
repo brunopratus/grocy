@@ -65,7 +65,7 @@ function show(id) {
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
-  $("#bug-btn").hidden = id === "login" || id === "bug";
+  $("#bug-btn").hidden = !lookups.testing || id === "login" || id === "bug";  // test phase only
   if (!["scan", "label"].includes(id)) receiptCtx = null;  // back on the receipt (or elsewhere): line context done
   const forLine = receiptCtx != null && (id === "scan" || id === "label") ? lastReceipt?.lines[receiptCtx] : null;
   $("#ctx").hidden = !forLine;
@@ -105,7 +105,7 @@ function fillPickers() {
 
 async function refreshLookups() {
   lookups = await api("/lookups");
-  $("#version").textContent = lookups.version ? `version ${lookups.version}` : "";
+  $("#version").textContent = (lookups.version ? `version ${lookups.version}` : "") + (lookups.testing ? " · test phase" : "");
   fillPickers();
 }
 
