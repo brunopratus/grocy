@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import alerts
+from .bugs import install_log_buffer
 from .claude import ClaudeClient, ClaudeError
 from .config import Settings, get_settings
 from .db import Database
@@ -29,6 +30,7 @@ from .units import UnitError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+install_log_buffer()
 log = logging.getLogger("companion")
 
 STATIC = Path(__file__).resolve().parent.parent / "static"

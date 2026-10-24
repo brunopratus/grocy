@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from . import alerts, mealplan, products, receipts, recipes, reports, stock
+from . import alerts, bugs, mealplan, products, receipts, recipes, reports, stock
 from .deps import Services
 from .setup import run_setup
 
@@ -57,8 +58,8 @@ async def logout(response: Response) -> dict[str, Any]:
 
 
 @router.get("/health")
-async def health() -> dict[str, Any]:
-    return {"ok": True}
+async def health(request: Request) -> dict[str, Any]:
+    return {"ok": True, "version": svc_of(request).settings.version}
 
 
 # --- setup / lookups --------------------------------------------------------------
@@ -88,6 +89,7 @@ async def lookups(request: Request) -> dict[str, Any]:
         "stores": sorted(svc.catalog.shopping_locations, key=str.lower),
         "locations": sorted(svc.catalog.locations, key=str.lower),
         "people": svc.settings.people,
+        "version": svc.settings.version,
     }
 
 
@@ -295,6 +297,30 @@ async def receipt_inbox(request: Request) -> dict[str, Any]:
 @router.post("/receipts/commit")
 async def receipt_commit(request: Request, body: receipts.ReceiptCommitIn) -> dict[str, Any]:
     return await receipts.commit_lines(svc_of(request), body)
+
+
+# --- bug reports --------------------------------------------------------------------------
+
+
+@router.post("/bugs")
+async def bug_report(
+    request: Request,
+    description: str = Form(..., min_length=3, max_length=5000),
+    screen: str | None = Form(None),
+    context: str = Form("{}"),
+    screenshot: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    try:
+        ctx = json.loads(context)
+    except ValueError:
+        ctx = {"raw": context[:5000]}
+    image = (await _read(screenshot))[0] if screenshot and screenshot.filename else None
+    return await bugs.report(svc_of(request), description, screen, ctx if isinstance(ctx, dict) else {}, image)
+
+
+@router.get("/bugs")
+async def bug_list(request: Request, status: str | None = None) -> list[dict[str, Any]]:
+    return svc_of(request).db.list_bugs(status)
 
 
 @router.get("/bank/matches")

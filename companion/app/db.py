@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS plans (
     plan TEXT NOT NULL,
     summary TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    description TEXT NOT NULL,
+    screen TEXT,
+    version TEXT,
+    context TEXT NOT NULL,           -- JSON: actions, errors, device, server log lines, checklist
+    screenshot TEXT,                 -- file name under <data>/bugs/
+    github_url TEXT,
+    status TEXT NOT NULL DEFAULT 'open'
+);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -95,6 +106,31 @@ class Database:
             )
             self._conn.commit()
             return int(cur.lastrowid or 0)
+
+    def add_bug(self, description: str, screen: str | None, version: str, context: dict[str, Any]) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO bug_reports (ts, description, screen, version, context) VALUES (?, ?, ?, ?, ?)",
+                (self._now(), description, screen, version, json.dumps(context, ensure_ascii=False)),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def update_bug(self, bug_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self._lock:
+            self._conn.execute(f"UPDATE bug_reports SET {cols} WHERE id = ?", [*fields.values(), bug_id])  # noqa: S608
+            self._conn.commit()
+
+    def list_bugs(self, status: str | None = None) -> list[dict[str, Any]]:
+        sql, args = "SELECT * FROM bug_reports", []
+        if status:
+            sql, args = sql + " WHERE status = ?", [status]
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY id DESC", args).fetchall()
+        return [{**dict(r), "context": json.loads(r["context"])} for r in rows]
 
     def list_events(self, limit: int = 100, kind: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM events"

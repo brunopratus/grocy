@@ -125,3 +125,35 @@ async def test_pdf_receipt_is_sent_as_document(settings, catalog, fake_grocy, tm
     assert r["original"].endswith(".pdf")
     block = svc.claude._client.requests[0]["messages"][0]["content"][0]  # type: ignore[attr-defined]
     assert block["type"] == "document" and block["source"]["media_type"] == "application/pdf"
+
+
+def test_similar_product_ignores_accents_and_wording():
+    catalog = [{"id": 1, "name": "Kiaušiniai"}, {"id": 2, "name": "Pienas 2.5%"}]
+    assert receipts.similar_product(catalog, "Viščių kiaušiniai L", "Chicken eggs L") == 1
+    assert receipts.similar_product(catalog, "Bananai", "Bananas") is None
+
+
+@pytest.mark.asyncio
+async def test_preview_suggests_a_product_to_confirm(settings, catalog, fake_grocy, tmp_path):
+    _seed(fake_grocy)
+    fake_grocy.seed(
+        "products", {"id": 2, "name": "Kiaušiniai", "qu_id_stock": QU["piece"], "qu_id_purchase": QU["piece"]}
+    )
+    parsed = {
+        **PARSED,
+        "lines": [
+            {"text": "Viščių kiaušiniai L", "name_en": "Eggs", "quantity": 1, "unit": "pack", "line_total_eur": 2.59},
+            {
+                "text": "Tamsusis alus",
+                "name_en": "Stout",
+                "quantity": 1,
+                "unit": "piece",
+                "line_total_eur": 1.89,
+                "suggested_product_id": 1,
+            },
+        ],
+    }
+    svc = make_services(settings, catalog, fake_grocy, [parsed])
+    r = await receipts.import_photo(svc, b"jpg", "image/jpeg", False, str(tmp_path))
+    assert [line["product_id"] for line in r["lines"]] == [None, None]
+    assert [line["suggestion"]["name"] for line in r["lines"]] == ["Kiaušiniai", "Alus Guinness"]

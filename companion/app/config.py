@@ -31,6 +31,9 @@ class Settings:
     alert_hour: int
     alert_due_days: int
     off_user_agent: str
+    version: str = "dev"
+    bug_github_repo: str = ""
+    bug_github_token: str = ""
 
     @property
     def grocy_api(self) -> str:
@@ -59,4 +62,8 @@ def get_settings() -> Settings:
         alert_hour=int(env("ALERT_HOUR", "8")),
         alert_due_days=int(env("ALERT_DUE_DAYS", "3")),
         off_user_agent=env("OFF_USER_AGENT", "GrocyPlus-Companion/0.1 (self-hosted household app)"),
+        # Railway sets the deployed commit; shown in the app and attached to bug reports
+        version=(env("RAILWAY_GIT_COMMIT_SHA") or env("GIT_COMMIT") or "dev")[:7],
+        bug_github_repo=env("BUG_GITHUB_REPO", ""),
+        bug_github_token=env("BUG_GITHUB_TOKEN", ""),
     )

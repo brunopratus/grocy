@@ -13,7 +13,10 @@ TODO (phase 4, later):
 
 from __future__ import annotations
 
+import difflib
 import logging
+import re
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -36,6 +39,11 @@ class ReceiptLine(BaseModel):
     line_total_eur: float = Field(description="Amount paid for this line after line discounts")
     is_food: bool = True
     product_id: int | None = Field(None, description="Matching catalog product id, only when clearly the same")
+    suggested_product_id: int | None = Field(
+        None,
+        description="When product_id is null: a catalog product that is probably the same food under another "
+        "name, brand or size (e.g. 'Viščių kiaušiniai L' -> 'Kiaušiniai'); the household confirms it",
+    )
 
 
 class ReceiptParse(BaseModel):
@@ -73,7 +81,8 @@ Lithuanian and abbreviated. Weighed items show a weight like '0,734 kg x 2,49'; 
 belong to the item they name or the item just above: subtract them from that line, never list them.
 Skip deposits ('užstatas', 'Skardinė (depozitinė)', 'Depozitas/įmoka'), shopping bags ('maišas'),
 totals, VAT, loyalty card and payment lines. Pet food, cleaning and other non-food: is_food=false.
-Map lines to catalog products by product_id only when it is clearly the same product."""
+Map lines to catalog products by product_id only when it is clearly the same product; when it only
+probably is (other wording, brand or size), give it as suggested_product_id instead."""
 
 
 async def import_photo(
@@ -104,6 +113,11 @@ async def import_photo(
         if line.product_id not in known_ids:
             row["product_id"] = None
         row["product"] = await product_card(svc, row["product_id"]) if row["product_id"] else None
+        suggestion = None
+        if not row["product_id"]:
+            suggestion = line.suggested_product_id if line.suggested_product_id in known_ids else None
+            suggestion = suggestion or similar_product(catalog, line.text, line.name_en)
+        row["suggestion"] = await product_card(svc, suggestion) if suggestion else None
         if commit and line.is_food and row["product_id"]:
             row.update(await _add_line(svc, CommitLine(**row), parsed.store))
         results.append(row)
@@ -119,6 +133,24 @@ async def import_photo(
         "committed": commit,
         "original": original.name,
     }
+
+
+def _norm(text: str) -> list[str]:
+    plain = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
+    return [w for w in re.findall(r"[a-z]{3,}", plain)]
+
+
+def similar_product(catalog: list[dict[str, Any]], *names: str) -> int | None:
+    """Fallback suggestion when Claude gave none: the catalog product sharing the most similar word."""
+    words = [w for n in names if n for w in _norm(n)]
+    best, best_score = None, 0.0
+    for product in catalog:
+        for pw in _norm(product["name"]):
+            for w in words:
+                score = difflib.SequenceMatcher(None, w, pw).ratio()
+                if score > best_score:
+                    best, best_score = product["id"], score
+    return best if best_score >= 0.8 else None
 
 
 async def inbox(svc: Services) -> dict[str, Any]:

@@ -7,12 +7,24 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
-  cook: "Cook recipe", stock: "Your stock", due: "Open / due", receipt: "Finish shopping", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
+  cook: "Cook recipe", stock: "Your stock", due: "Open / due", receipt: "Finish shopping", bug: "Report a bug", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
 };
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
 // --- plumbing -----------------------------------------------------------------
+// --- what happened before a bug report: last steps, errors (kept in memory, sent only with a report) ---
+const trail = { actions: [], errors: [] };
+const clock = () => new Date().toTimeString().slice(0, 8);
+function remember(kind, entry) {
+  const list = trail[kind];
+  list.push({ t: clock(), ...entry });
+  if (list.length > 60) list.shift();
+}
+window.addEventListener("error", (e) => remember("errors", { js: `${e.message} (${e.filename?.split("/").pop()}:${e.lineno})` }));
+window.addEventListener("unhandledrejection", (e) => remember("errors", { js: String(e.reason?.message || e.reason) }));
+
 function toast(msg, ms = 3500) {
+  if (ms > 3500) remember("errors", { shown: msg });  // long toasts are the error messages
   const t = $("#toast");
   t.textContent = msg;
   t.hidden = false;
@@ -26,10 +38,18 @@ async function api(path, { method = "GET", json, form, busy } = {}) {
     const opts = { method, credentials: "same-origin", headers: {} };
     if (json !== undefined) { opts.body = JSON.stringify(json); opts.headers["Content-Type"] = "application/json"; }
     if (form) opts.body = form;
+    const started = Date.now();
     const res = await fetch(path, opts);
-    if (res.status === 401) { show("login"); throw new Error("Please log in"); }
+    const step = { api: `${method} ${path.split("?")[0]}`, status: res.status, ms: Date.now() - started };
+    if (res.status === 401) { remember("actions", step); show("login"); throw new Error("Please log in"); }
     const data = res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text();
-    if (!res.ok) throw new Error(data?.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : res.statusText);
+    if (!res.ok) {
+      const msg = data?.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : res.statusText;
+      remember("actions", { ...step, error: msg });
+      remember("errors", { api: step.api, status: res.status, error: msg });
+      throw new Error(msg);
+    }
+    remember("actions", step);
     return data;
   } finally {
     if (busy) $("#busy").hidden = true;
@@ -37,11 +57,15 @@ async function api(path, { method = "GET", json, form, busy } = {}) {
 }
 
 let currentPanel = null;
+let lastScreen = null;
 function show(id) {
+  if (id !== "bug") lastScreen = id;
+  remember("actions", { screen: id });
   currentPanel = id;
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
+  $("#bug-btn").hidden = id === "login" || id === "bug";
   if (!["scan", "label"].includes(id)) receiptCtx = null;  // back on the receipt (or elsewhere): line context done
   const forLine = receiptCtx != null && (id === "scan" || id === "label") ? lastReceipt?.lines[receiptCtx] : null;
   $("#ctx").hidden = !forLine;
@@ -81,6 +105,7 @@ function fillPickers() {
 
 async function refreshLookups() {
   lookups = await api("/lookups");
+  $("#version").textContent = lookups.version ? `version ${lookups.version}` : "";
   fillPickers();
 }
 
@@ -318,6 +343,10 @@ function renderReceipt() {
     .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
   const rows = r.lines.map((l, i) => {
     const st = lineState(l);
+    const suggest = !l.product && l.suggestion && !l.suggestion_no
+      ? `<div class="rsugg"><span>In Grocy as <strong>${esc(l.suggestion.name)}</strong>?</span>
+          <button type="button" data-act="sugg-yes" data-i="${i}">Yes</button>
+          <button type="button" class="secondary" data-act="sugg-no" data-i="${i}">No</button></div>` : "";
     const actions = [
       !l.product ? `<button type="button" class="secondary" data-act="scan" data-i="${i}">Scan barcode</button>` : "",
       l.product && !hasNutrition(l.product) ? `<button type="button" class="secondary" data-act="label" data-i="${i}">Photo of label</button>` : "",
@@ -328,7 +357,7 @@ function renderReceipt() {
       <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
       ${l.include ? `<div class="chips">${chipsHtml(l)}</div><div class="rq">${shelfQuestionHtml(l, i)}</div>
       ${l.product ? amountHtml(l, i) : ""}
-      ${actions ? `<div class="ractions">${actions}</div>` : ""}
+      ${suggest}${actions ? `<div class="ractions">${actions}</div>` : ""}
       <select class="rprod" data-i="${i}" aria-label="Grocy product">${opts(l.product_id)}</select>` : ""}
       ${l.include && needsPack(l) ? `<div class="small warn rhint"${st.why === "pack" ? "" : " hidden"}>How much is one pack? (e.g. 500 g of butter)</div>` : ""}</li>`;
   }).join("");
@@ -433,6 +462,12 @@ function wireReceipt() {
         return toast("Receipt discarded");
       }
       if (b.dataset.act === "shelf") return await askShelfLife(Number(b.dataset.i), b.dataset.a);
+      if (b.dataset.act === "sugg-yes" || b.dataset.act === "sugg-no") {
+        const l = lastReceipt.lines[Number(b.dataset.i)];
+        if (b.dataset.act === "sugg-yes") Object.assign(l, { product_id: l.suggestion.id, product: l.suggestion, include: true, shelf: null });
+        else l.suggestion_no = true;
+        return renderReceipt();
+      }
       receiptCtx = Number(b.dataset.i);
       const l = lastReceipt.lines[receiptCtx];
       if (b.dataset.act === "scan") show("scan");
@@ -498,6 +533,68 @@ function renderStock() {
   }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
 }
 
+// --- bug reports ---------------------------------------------------------------------------
+let bugShot = null;  // automatic screenshot of the screen the report is about
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some((x) => x.src === src)) return resolve();
+    const el = Object.assign(document.createElement("script"), { src, onload: resolve, onerror: reject });
+    document.head.appendChild(el);
+  });
+}
+
+async function captureScreen() {
+  try {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+    const canvas = await window.html2canvas(document.body, {
+      backgroundColor: "#0A0C0B", scale: 1, logging: false, ignoreElements: (el) => el.id === "busy",
+      height: Math.min(document.body.scrollHeight, 4000), windowWidth: document.documentElement.clientWidth,
+    });
+    return await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.7));
+  } catch { return null; }  // no screenshot: the report still has everything else
+}
+
+async function openBugReport() {
+  $("#busy-text").textContent = "Taking a screenshot…";
+  $("#busy").hidden = false;
+  bugShot = await captureScreen();
+  $("#busy").hidden = true;
+  $("#bug-result").innerHTML = "";
+  $("#bug-form").hidden = false;
+  $("#bug-shot").innerHTML = bugShot
+    ? `<p class="small muted">Screenshot of the screen you were on (attached):</p><img class="shot" src="${URL.createObjectURL(bugShot)}" alt="">`
+    : "";
+  show("bug");
+}
+
+async function sendBugReport(e) {
+  const f = e.target;
+  const context = {
+    actions: trail.actions,
+    errors: trail.errors,
+    device: { userAgent: navigator.userAgent, screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
+      standalone: matchMedia("(display-mode: standalone)").matches, language: navigator.language },
+    page: location.hash || "#home",
+    receipt: f.receipt.checked && lastReceipt ? lastReceipt : null,
+  };
+  const fd = new FormData();
+  fd.append("description", f.description.value.trim());
+  fd.append("screen", lastScreen || "");
+  fd.append("context", JSON.stringify(context));
+  const own = f.screenshot.files[0];
+  if (own || bugShot) fd.append("screenshot", own || bugShot, "screenshot.jpg");
+  const r = await api("/bugs", { method: "POST", form: fd, busy: "Sending…" });
+  f.reset();
+  f.hidden = true;
+  $("#bug-shot").innerHTML = "";
+  $("#bug-result").innerHTML = `<div class="card"><h2>Thanks, saved as bug #${r.id}</h2>
+    <p class="small muted">${r.github_url ? `Also filed on GitHub: <a href="${esc(r.github_url)}">${esc(r.github_url.split("/").slice(-2).join(" #"))}</a>.` : "It's stored in the companion."}
+    Ask Claude to "fix the reported bugs" in your coding chat.</p>
+    <button type="button" id="bug-back" class="secondary">Back to where I was</button></div>`;
+  $("#bug-back").addEventListener("click", () => show(lastScreen || "home"));
+}
+
 // --- wiring ------------------------------------------------------------------------------
 function on(sel, ev, fn) {
   $(sel).addEventListener(ev, async (e) => {
@@ -508,9 +605,15 @@ function on(sel, ev, fn) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   $$("[data-go]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); show(b.dataset.go); }));
-  $("#back").addEventListener("click", () => show(receiptCtx != null && ["scan", "label"].includes(currentPanel) ? "receipt" : "home"));
+  $("#back").addEventListener("click", () => {
+    if (currentPanel === "bug") return show(lastScreen || "home");
+    show(receiptCtx != null && ["scan", "label"].includes(currentPanel) ? "receipt" : "home");
+  });
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
+  on("#bug-btn", "click", openBugReport);
+  on("#bug-link", "click", (e) => { e.preventDefault(); return openBugReport(); });
+  on("#bug-form", "submit", sendBugReport);
   $("#stock-q").addEventListener("input", renderStock);
   $("#stock-list").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-open]");

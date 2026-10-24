@@ -211,3 +211,10 @@ button.danger { color: var(--bad); border-color: rgba(255, 122, 89, 0.45); }
 #receipt-result .card > button.danger { margin-top: .4rem; }
 label.unit { flex: 0 0 5.5rem; }
 #scan-hint { margin: 0 0 .6rem; }
+.rsugg { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .6rem 0 .2rem; padding: .6rem .7rem;
+  border: 1px solid rgba(200, 241, 105, 0.35); background: var(--accent-soft); border-radius: 12px; }
+.rsugg span { flex: 1 1 60%; }
+.rsugg button { padding: .45rem .9rem; font-size: .9rem; }
+header #bug-btn { margin-left: auto; color: var(--muted); }
+img.shot { display: block; width: 45%; margin: .3rem 0 .9rem; border: 1px solid var(--line-strong); border-radius: 10px; }
+#version { font-family: var(--mono); font-size: .68rem; opacity: .7; }

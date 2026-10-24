@@ -20,6 +20,7 @@
 <header>
   <button id="back" class="icon" hidden aria-label="Back"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
   <h1 id="title">Grocy+</h1>
+  <button id="bug-btn" class="icon" type="button" hidden aria-label="Report a bug" title="Report a bug"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9h8v6a4 4 0 0 1-8 0zM9 9V7a3 3 0 0 1 6 0v2M4 13h4M16 13h4M5 7l3 2M19 7l-3 2M5 19l3-2M19 19l-3-2"/></svg></button>
 </header>
 
 <main>
@@ -46,7 +47,7 @@
       <button data-go="report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Weekly report<small>Food, money, waste</small></span></button>
     </div>
     <div id="home-due" class="card"></div>
-    <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" id="logout">Log out</a></p>
+    <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" id="bug-link">Report a bug</a> · <a href="#" id="logout">Log out</a><br><span id="version"></span></p>
   </section>
 
   <!-- Scan -->
@@ -202,6 +203,22 @@
       <button type="submit">Read receipt</button>
     </form>
     <div id="receipt-result"></div>
+  </section>
+
+  <!-- Bug report -->
+  <section id="bug" class="panel" hidden>
+    <form id="bug-form" class="card">
+      <h2>Report a bug</h2>
+      <label>What happened, and what did you expect?<textarea name="description" rows="4" required minlength="3"
+        placeholder="e.g. Read label shows an error for Coca-Cola"></textarea></label>
+      <div id="bug-shot"></div>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Add your own screenshot (optional)<input name="screenshot" type="file" accept="image/*"></label>
+      <label class="check"><input name="receipt" type="checkbox" checked> Include the open receipt checklist</label>
+      <p class="small muted">Also attached automatically: the screen you were on, your last steps in the app, error
+        messages, the app version, your phone model and the server's recent log. No passwords or keys.</p>
+      <button type="submit">Send report</button>
+    </form>
+    <div id="bug-result"></div>
   </section>
 
   <!-- Report -->
