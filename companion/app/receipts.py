@@ -20,9 +20,9 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
-from .claude import compact_json, image_block
+from .claude import compact_json, image_block, pdf_block
 from .deps import Services
-from .products import StockAddIn, add_stock, summary
+from .products import StockAddIn, add_stock, set_pack_size, summary
 from .units import UnitError, normalize_unit
 
 log = logging.getLogger(__name__)
@@ -81,7 +81,8 @@ async def import_photo(
 ) -> dict[str, Any]:
     folder = Path(data_dir) / "receipts"
     folder.mkdir(parents=True, exist_ok=True)
-    original = folder / f"{datetime.now():%Y%m%d-%H%M%S}.jpg"
+    is_pdf = media_type == "application/pdf" or image[:5] == b"%PDF-"
+    original = folder / f"{datetime.now():%Y%m%d-%H%M%S}.{'pdf' if is_pdf else 'jpg'}"
     original.write_bytes(image)
 
     catalog = [{"id": int(p["id"]), "name": p["name"]} for p in await svc.products()]
@@ -92,7 +93,7 @@ async def import_photo(
         effort="medium",
         max_tokens=8000,
         content=[
-            image_block(image, media_type),
+            pdf_block(image) if is_pdf else image_block(image, media_type),
             {"type": "text", "text": f"Product catalog: {compact_json(catalog)}\nParse this receipt."},
         ],
     )
@@ -141,9 +142,7 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
                 pack_unit = normalize_unit(line.pack_unit or "g")
             except UnitError:
                 pack_unit = "g"
-            await svc.grocy.set_userfields(
-                "products", line.product_id, {"net_amount_per_pack": line.pack_size, "net_unit": pack_unit}
-            )
+            await set_pack_size(svc, await svc.grocy.object("products", line.product_id), line.pack_size, pack_unit)
         res = await add_stock(
             svc,
             StockAddIn(

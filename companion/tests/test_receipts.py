@@ -116,3 +116,12 @@ async def test_commit_uses_confirmed_pack_size(settings, catalog, fake_grocy):
 async def test_inbox_is_empty_until_email_receipts(settings, catalog, fake_grocy):
     svc = make_services(settings, catalog, fake_grocy)
     assert await receipts.inbox(svc) == {"receipts": [], "sources": []}
+
+
+@pytest.mark.asyncio
+async def test_pdf_receipt_is_sent_as_document(settings, catalog, fake_grocy, tmp_path):
+    svc = make_services(settings, catalog, fake_grocy, [PARSED])
+    r = await receipts.import_photo(svc, b"%PDF-1.7 receipt", "application/pdf", False, str(tmp_path))
+    assert r["original"].endswith(".pdf")
+    block = svc.claude._client.requests[0]["messages"][0]["content"][0]  # type: ignore[attr-defined]
+    assert block["type"] == "document" and block["source"]["media_type"] == "application/pdf"

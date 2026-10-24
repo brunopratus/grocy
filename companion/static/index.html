@@ -53,6 +53,7 @@
   <section id="scan" class="panel" hidden>
     <div class="card">
       <video id="video" playsinline muted></video>
+      <p id="scan-hint" class="small muted">Start the camera and hold the barcode in view: it's read automatically.</p>
       <div class="row">
         <button id="scan-start">Start camera</button>
         <button id="scan-stop" class="secondary">Stop</button>
@@ -87,7 +88,10 @@
       <label>Product<select name="product_id" class="products"><option value="new">New product</option></select></label>
       <label>Barcode (optional)<input name="barcode" inputmode="numeric"></label>
       <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Nutrition table<input name="img1" type="file" accept="image/*" capture="environment" required></label>
-      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Front / net weight (optional)<input name="img2" type="file" accept="image/*" capture="environment"></label>
+      <div class="row">
+        <label>Pack size, if not on the photo<input name="net_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 500"></label>
+        <label class="unit">Unit<select name="net_unit"><option>g</option><option>ml</option></select></label>
+      </div>
       <button type="submit">Read label</button>
     </form>
     <div id="label-result"></div>
@@ -163,6 +167,11 @@
       <button id="due-refresh" class="secondary">Refresh</button>
     </div>
     <div id="due-list"></div>
+    <div class="card">
+      <h2>Opened something?</h2>
+      <p class="small muted">Find it in your stock and tap <strong>Opened</strong>: the due date becomes the "use within N days after opening".</p>
+      <button type="button" data-go="stock" class="secondary">Mark as opened</button>
+    </div>
   </section>
 
   <!-- Week plan -->
@@ -189,7 +198,7 @@
   <section id="receipt" class="panel" hidden>
     <div id="receipt-inbox" class="card"></div>
     <form id="receipt-form" class="card">
-      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Scan the paper receipt<input name="image" type="file" accept="image/*" capture="environment" required></label>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></svg>Receipt: take a photo, or choose a photo or PDF<input name="image" type="file" accept="image/*,application/pdf" required></label>
       <button type="submit">Read receipt</button>
     </form>
     <div id="receipt-result"></div>

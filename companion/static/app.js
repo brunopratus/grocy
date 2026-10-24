@@ -36,15 +36,18 @@ async function api(path, { method = "GET", json, form, busy } = {}) {
   }
 }
 
+let currentPanel = null;
 function show(id) {
+  currentPanel = id;
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
-  if (!["scan", "label", "receipt"].includes(id)) receiptCtx = null;
+  if (!["scan", "label"].includes(id)) receiptCtx = null;  // back on the receipt (or elsewhere): line context done
   const forLine = receiptCtx != null && (id === "scan" || id === "label") ? lastReceipt?.lines[receiptCtx] : null;
   $("#ctx").hidden = !forLine;
   if (forLine) $("#ctx-text").textContent = forLine.text;
   if (id !== "scan") stopScan();
+  if (id === "scan" && receiptCtx != null) startScan().catch(() => {});
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
   if (id === "home") loadHomeDue();
@@ -127,11 +130,30 @@ async function startScan() {
   try {
     scanControls = await reader.decodeFromConstraints(
       { video: { facingMode: "environment" } }, $("#video"),
-      (result) => { if (result) { const code = result.getText(); stopScan(); navigator.vibrate?.(80); lookupCode(code); } },
+      (result) => {
+        if (!result) return;
+        const code = result.getText();
+        // Accept a code only when its check digit is right and two reads in a row agree:
+        // single misreads (another barcode in view, a blurry frame) are skipped.
+        if (!validBarcode(code) || code !== lastRead) { lastRead = code; return; }
+        stopScan();
+        navigator.vibrate?.(80);
+        $("#manual-code [name=code]").value = code;
+        toast(`Barcode ${code}`);
+        lookupCode(code).catch((err) => toast(err.message, 6000));
+      },
     );
   } catch (e) { toast(`Camera: ${e.message}`); }
 }
-function stopScan() { if (scanControls) { scanControls.stop(); scanControls = null; } }
+let lastRead = null;
+function validBarcode(code) {
+  if (!/^\d{8}$|^\d{12,14}$/.test(code)) return /\S/.test(code) && !/^\d+$/.test(code);  // non-numeric codes: accept
+  const digits = code.split("").map(Number);
+  const check = digits.pop();
+  const sum = digits.reverse().reduce((a, d, i) => a + d * (i % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === check;
+}
+function stopScan() { lastRead = null; if (scanControls) { scanControls.stop(); scanControls = null; } }
 
 async function lookupCode(code) {
   const r = await api(`/products/barcode/${encodeURIComponent(code)}`, { method: "POST", busy: "Looking up…" });
@@ -208,15 +230,21 @@ function amountHtml(l, i) {
 }
 
 function chip(ok, text, warn) {
-  return `<span class="chip ${ok ? "ok" : warn ? "warn" : "bad"}">${ok ? "✓" : "!"} ${esc(text)}</span>`;
+  return `<span class="chip ${ok ? "ok" : warn ? "warn" : "bad"}">${esc(text)} ${ok ? "✓" : "!"}</span>`;
 }
 
 function chipsHtml(l) {
+  const counted = COUNT_UNITS.includes(l.unit);
+  if (!l.product) {
+    // Not in Grocy yet: nothing is known about it
+    return [chip(false, "In Grocy"), chip(false, "Nutrition"), counted ? chip(false, "Weight") : chip(true, "Weight")].join("");
+  }
+  const weight = !counted || l.pack_size ? chip(true, "Weight") : needsPack(l) ? chip(false, "Weight") : chip(false, "Weight", true);
   return [
-    l.product ? chip(true, "In Grocy") : chip(false, "Missing in Grocy"),
-    l.product ? (hasNutrition(l.product) ? chip(true, "Nutrition") : chip(false, "No nutrition", true)) : "",
-    l.product && needsPack(l) ? (l.pack_size ? chip(true, "Amount") : chip(false, "Pack size?")) : "",
-    l.product ? shelfChip(l) : "",
+    chip(true, "In Grocy"),
+    hasNutrition(l.product) ? chip(true, "Nutrition") : chip(false, "Nutrition", true),
+    weight,
+    shelfChip(l),
   ].join("");
 }
 
@@ -225,7 +253,7 @@ function shelfChip(l) {
   if (!needsShelf(l.product)) return chip(true, days < 0 ? "No due date" : `Keeps ${days} d`);
   if (l.shelf === "asking") return chip(false, "Shelf life: asking Claude…", true);
   if (l.shelf === "question") return chip(false, "Shelf life: question", true);
-  return chip(false, "No shelf life", true);
+  return chip(false, "Shelf life", true);
 }
 
 function shelfQuestionHtml(l, i) {
@@ -286,7 +314,7 @@ function updateReceiptLine(i) {
 function renderReceipt() {
   const r = lastReceipt;
   r.lines.forEach(initLine);
-  const opts = (sel) => `<option value="">${sel ? "Skip" : "Choose in Grocy…"}</option>` + lookups.products
+  const opts = (sel) => `<option value="">${sel ? "Not this product" : "Already in Grocy under another name? Pick it"}</option>` + lookups.products
     .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
   const rows = r.lines.map((l, i) => {
     const st = lineState(l);
@@ -312,7 +340,8 @@ function renderReceipt() {
     <div class="rsum">${sumHtml}</div>
     <ul class="list">${rows}</ul>
     <button id="receipt-commit" type="button"${ready ? "" : " disabled"}>Add ${ready} ready line${ready === 1 ? "" : "s"} to stock</button>
-    <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p></div>`;
+    <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p>
+    <button id="receipt-discard" type="button" class="secondary danger">Discard this receipt</button></div>`;
   saveReceipt();
   ensureShelfLife();
 }
@@ -395,6 +424,14 @@ function wireReceipt() {
     if (!b) return;
     try {
       if (b.id === "receipt-commit") return await commitReceipt();
+      if (b.id === "receipt-discard") {
+        if (!confirm("Discard this receipt? Nothing more is added to stock.")) return;
+        lastReceipt = null;
+        saveReceipt();
+        try { localStorage.removeItem("gp-receipt"); } catch { /* ignore */ }
+        $("#receipt-result").innerHTML = "";
+        return toast("Receipt discarded");
+      }
       if (b.dataset.act === "shelf") return await askShelfLife(Number(b.dataset.i), b.dataset.a);
       receiptCtx = Number(b.dataset.i);
       const l = lastReceipt.lines[receiptCtx];
@@ -456,7 +493,8 @@ function renderStock() {
     const cls = d == null ? "" : d < 0 ? "bad" : d <= 2 ? "warn" : "";
     const when = d == null ? "" : d < 0 ? `${-d} d overdue` : d === 0 ? "due today" : `${d} d left`;
     return `<div class="sitem"><strong>${esc(i.name)}</strong><span class="num">${esc(i.amount_text)}</span></div>
-      <div class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</div>`;
+      <div class="sline"><span class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</span>
+      <button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button></div>`;
   }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
 }
 
@@ -470,10 +508,20 @@ function on(sel, ev, fn) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   $$("[data-go]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); show(b.dataset.go); }));
-  $("#back").addEventListener("click", () => show(receiptCtx != null ? "receipt" : "home"));
+  $("#back").addEventListener("click", () => show(receiptCtx != null && ["scan", "label"].includes(currentPanel) ? "receipt" : "home"));
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
   $("#stock-q").addEventListener("input", renderStock);
+  $("#stock-list").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-open]");
+    if (!b) return;
+    try {
+      const r = await api(`/stock/${b.dataset.open}/open`, { method: "POST", busy: "Marking as opened…" });
+      toast(r.message, 5000);
+      stockItems = await api("/stock/all");
+      renderStock();
+    } catch (err) { toast(err.message, 6000); }
+  });
   window.addEventListener("popstate", () => show(location.hash.slice(1) || "home"));
 
   on("#login-form", "submit", async (e) => {
@@ -507,9 +555,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const f = e.target;
     const fd = new FormData();
     fd.append("images", f.img1.files[0]);
-    if (f.img2.files[0]) fd.append("images", f.img2.files[0]);
     if (f.barcode.value) fd.append("barcode", f.barcode.value);
+    if (Number(f.net_amount.value) > 0) { fd.append("net_amount", f.net_amount.value); fd.append("net_unit", f.net_unit.value); }
     const r = await api(`/products/${f.product_id.value}/label-photo`, { method: "POST", form: fd, busy: "Reading label…" });
+    if (!r.pack_size && ["g", "ml"].includes(r.product.stock_unit)) r.warnings.push("Pack size isn't printed on the label: type it in \"Pack size\" next time, or on the receipt line.");
     if (receiptCtx != null) {
       f.reset();
       if (r.warnings.length) toast(r.warnings.join(" "), 6000);

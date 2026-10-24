@@ -101,7 +101,12 @@ async def barcode(code: str, request: Request) -> dict[str, Any]:
 
 @router.post("/products/{product_id}/label-photo")
 async def label_photo(
-    product_id: str, request: Request, images: list[UploadFile] = File(...), barcode: str | None = Form(None)
+    product_id: str,
+    request: Request,
+    images: list[UploadFile] = File(...),
+    barcode: str | None = Form(None),
+    net_amount: float | None = Form(None, gt=0),
+    net_unit: str | None = Form(None),
 ) -> dict[str, Any]:
     pid: int | None
     if product_id == "new":
@@ -111,7 +116,7 @@ async def label_photo(
     else:
         raise HTTPException(400, "product_id must be a number or 'new'")
     files = [await _read(f) for f in images]
-    return await products.label_photo(svc_of(request), pid, files, barcode)
+    return await products.label_photo(svc_of(request), pid, files, barcode, net_amount, net_unit)
 
 
 @router.post("/products/{product_id}/shelf-life")
@@ -191,6 +196,11 @@ async def events(request: Request, limit: int = Query(100, le=1000), kind: str |
 @router.get("/stock/all")
 async def stock_all(request: Request) -> list[dict[str, Any]]:
     return await stock.inventory(svc_of(request))
+
+
+@router.post("/stock/{product_id}/open")
+async def open_product(product_id: int, request: Request) -> dict[str, Any]:
+    return await stock.open_product(svc_of(request), product_id)
 
 
 @router.get("/stock/open-due")

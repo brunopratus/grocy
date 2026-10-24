@@ -126,6 +126,16 @@ class FakeGrocy(GrocyClient):
             if amount > 0
         ]
 
+    async def stock_entries(self, product_id: int) -> list[dict[str, Any]]:
+        return [dict(e) for e in self.tables.get("stock", {}).values() if e["product_id"] == product_id]
+
+    async def open_stock(self, product_id: int, amount: float, stock_entry_id: str | None = None) -> Any:
+        self.calls.append(("open", product_id, amount, stock_entry_id))
+        for e in self.tables.get("stock", {}).values():
+            if e["stock_id"] == stock_entry_id:
+                e.update({"open": 1, "best_before_date": "2026-10-27"})
+        return [{"transaction_id": "tx-open"}]
+
     async def volatile(self, due_soon_days: int | None = None) -> dict[str, Any]:
         return {"due_products": [], "overdue_products": [], "expired_products": [], "missing_products": []}
 

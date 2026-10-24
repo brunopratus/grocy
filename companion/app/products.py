@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import secrets
 from collections.abc import Awaitable
@@ -209,10 +210,7 @@ async def create_product(svc: Services, spec: NewProduct) -> dict[str, Any]:
 
     if purchase_qu != stock_qu and spec.net_amount_per_pack and spec.net_unit:
         factor = convert(spec.net_amount_per_pack, spec.net_unit, stock_unit)
-        await svc.grocy.add_object(
-            "quantity_unit_conversions",
-            {"from_qu_id": purchase_qu, "to_qu_id": stock_qu, "factor": factor, "product_id": pid},
-        )
+        await set_pack_conversion(svc, pid, purchase_qu, stock_qu, factor)
 
     uf: dict[str, Any] = {}
     if spec.nutrition:
@@ -234,6 +232,33 @@ async def create_product(svc: Services, spec: NewProduct) -> dict[str, Any]:
         data={"source": spec.nutrition_source, "barcode": spec.barcode},
     )
     return await svc.grocy.object("products", pid)
+
+
+async def set_pack_conversion(svc: Services, product_id: int, from_qu: int, to_qu: int, factor: float) -> None:
+    """1 pack = factor stock units. Grocy creates a 1:1 conversion by itself when a product's purchase and
+    stock units differ, so update that one instead of adding a second (which Grocy refuses)."""
+    existing = await svc.grocy.objects(
+        "quantity_unit_conversions", [f"product_id={product_id}", f"from_qu_id={from_qu}", f"to_qu_id={to_qu}"]
+    )
+    if existing:
+        await svc.grocy.edit_object("quantity_unit_conversions", int(existing[0]["id"]), {"factor": factor})
+    else:
+        await svc.grocy.add_object(
+            "quantity_unit_conversions",
+            {"from_qu_id": from_qu, "to_qu_id": to_qu, "factor": factor, "product_id": product_id},
+        )
+
+
+async def set_pack_size(svc: Services, product: dict[str, Any], amount: float, unit: str) -> None:
+    """Remember the net amount of one pack/piece and keep Grocy's pack conversion in line with it."""
+    pid = int(product["id"])
+    await svc.grocy.set_userfields("products", pid, {"net_amount_per_pack": amount, "net_unit": unit})
+    purchase_qu, stock_qu = int(product["qu_id_purchase"]), int(product["qu_id_stock"])
+    stock_unit = svc.catalog.unit_of(stock_qu)
+    if purchase_qu != stock_qu:
+        # Stock kept in pieces: no conversion; the pack size is then only used for nutrition
+        with contextlib.suppress(UnitError):
+            await set_pack_conversion(svc, pid, purchase_qu, stock_qu, convert(amount, unit, stock_unit))
 
 
 async def update_nutrition(
@@ -435,10 +460,18 @@ use basis per_portion_only and give the portion size in g/ml. Do not invent nutr
 
 
 async def label_photo(
-    svc: Services, product_id: int | None, images: list[tuple[bytes, str | None]], barcode: str | None = None
+    svc: Services,
+    product_id: int | None,
+    images: list[tuple[bytes, str | None]],
+    barcode: str | None = None,
+    net_amount: float | None = None,
+    net_unit: str | None = None,
 ) -> dict[str, Any]:
+    """Read a nutrition label photo. The pack size comes from the photo when printed on it; otherwise
+    from ``net_amount``/``net_unit`` typed by the user (they win when both are given)."""
     if not 1 <= len(images) <= 2:
         raise CaptureError("Send 1 or 2 images: the nutrition table and optionally the front/net weight")
+    typed_amount, typed_unit = net_amount, (net_unit if net_unit in ("g", "ml") else None)
     product: dict[str, Any] | None = None
     if product_id:
         product = await svc.grocy.object("products", product_id)
@@ -474,6 +507,8 @@ async def label_photo(
 
     net_unit = ext.net_unit if ext.net_unit in ("g", "ml") else None
     net_amount = ext.net_quantity if net_unit else None
+    if typed_amount and typed_unit:
+        net_amount, net_unit = typed_amount, typed_unit
 
     if product is None:
         name = ext.name_en if not ext.brand else f"{ext.name_en} ({ext.brand})"
@@ -499,6 +534,8 @@ async def label_photo(
         status = "updated"
         if per100.kcal is not None:
             await update_nutrition(svc, product, per100, "label_photo", net_amount, net_unit)
+        if net_amount and net_unit:
+            await set_pack_size(svc, product, net_amount, net_unit)
         changes: dict[str, Any] = {}
         if not int(product.get("default_best_before_days_after_open") or 0):
             changes["default_best_before_days_after_open"] = ext.shelf_life_after_opening_days
@@ -542,6 +579,7 @@ async def label_photo(
             "shelf_life_after_opening_days": ext.shelf_life_after_opening_days,
             "shelf_life_unopened_days": ext.shelf_life_unopened_days,
         },
+        "pack_size": {"amount": net_amount, "unit": net_unit} if net_amount and net_unit else None,
         "warnings": warnings,
     }
 

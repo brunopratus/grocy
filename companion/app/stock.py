@@ -326,3 +326,32 @@ async def inventory(svc: Services) -> list[dict[str, Any]]:
             }
         )
     return sorted(items, key=lambda i: i["name"].lower())
+
+
+async def open_product(svc: Services, product_id: int) -> dict[str, Any]:
+    """Mark one pack/piece as opened (Grocy then shortens its due date to the 'after opening' days)."""
+    product = await svc.grocy.object("products", product_id)
+    unit = svc.catalog.unit_of(product.get("qu_id_stock"))
+    entries = [e for e in await svc.grocy.stock_entries(product_id) if not int(e.get("open") or 0)]
+    if not entries:
+        raise CaptureError(f"{product['name']}: nothing unopened in stock")
+    entry = min(entries, key=lambda e: e.get("best_before_date") or "9999")
+    available = float(entry["amount"])
+    net, net_unit = net_of(await svc.grocy.userfields("products", product_id))
+    try:
+        dim = normalize_unit(unit)
+    except UnitError:
+        dim = unit
+    if dim in ("piece", "pack"):
+        amount = 1.0
+    elif net and net_unit:
+        amount = convert(net, net_unit, unit)  # one pack, e.g. 500 g of a 1.5 kg stock
+    else:
+        amount = available  # pack size unknown: the whole stock entry is one pack
+    amount = min(amount, available)
+    await svc.grocy.open_stock(product_id, amount, entry["stock_id"])
+    after = [e for e in await svc.grocy.stock_entries(product_id) if int(e.get("open") or 0)]
+    due = min((e.get("best_before_date") or "" for e in after), default="") or None
+    message = f"Opened {fmt_amount(amount, unit)} {product['name']}, {_due_text(due)}"
+    svc.db.add_event("opened", message, product_id=product_id, product_name=product["name"])
+    return {"message": message, "due": due}

@@ -205,3 +205,9 @@ table.nut tr.sub td:first-child { padding-left: 1rem; color: var(--muted); }
 .rq p { margin: .5rem 0 .3rem; color: var(--warn); }
 .ropts { display: flex; flex-wrap: wrap; gap: .4rem; }
 .ropts button { padding: .45rem .8rem; font-size: .88rem; }
+.sline { display: flex; justify-content: space-between; align-items: center; gap: .6rem; margin-top: .2rem; }
+button.mini { padding: .3rem .7rem; font-size: .8rem; border-radius: 9px; }
+button.danger { color: var(--bad); border-color: rgba(255, 122, 89, 0.45); }
+#receipt-result .card > button.danger { margin-top: .4rem; }
+label.unit { flex: 0 0 5.5rem; }
+#scan-hint { margin: 0 0 .6rem; }
