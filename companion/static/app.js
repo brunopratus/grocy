@@ -61,8 +61,10 @@ let lastScreen = null;
 function show(id) {
   if (id !== "bug") lastScreen = id;
   remember("actions", { screen: id });
+  const changed = currentPanel !== id;
   currentPanel = id;
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
+  if (changed) window.scrollTo(0, 0);  // a new screen starts at the top, not where the last one was scrolled
   $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
   $("#bug-btn").hidden = !lookups.testing || id === "login" || id === "bug";  // test phase only
@@ -406,6 +408,7 @@ async function assignToLine(card) {
   await refreshLookups();
   renderReceipt();
   show("receipt");
+  $(`#receipt-result .rline[data-i="${lastReceipt.lines.indexOf(l)}"]`)?.scrollIntoView({ block: "center" });
   toast(`${card.name} linked to the receipt`);
 }
 
