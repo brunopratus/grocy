@@ -433,6 +433,12 @@ filed as issues labelled `bug-report` in the bugs repository, which a coding ses
   (one-click deploy with a short form for the keys and household settings) plus a setup guide; first use:
   a cousin's household.
 
+## Going to production (checklist, when testing is done)
+1. Companion: `TESTING=false` on the companion service (bug icon off; *Report a bug* stays on the home screen).
+2. Off-site backup: weekly compressed copy of the Grocy database (and the companion DB) to a private GitHub
+   repository, since Railway's own backups need the Pro plan. Not built yet; agreed to do at this point.
+3. Optional: move the code to a private repository (a fork of a public repo can't be made private).
+
 ## Local development
 
 ```bash
