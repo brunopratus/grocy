@@ -46,8 +46,9 @@
       <button data-go="plan"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg><span>Week plan<small>Meals & shopping</small></span></button>
       <button data-go="report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Weekly report<small>Food, money, waste</small></span></button>
     </div>
+    <div id="credit-warn" class="card warn-card" hidden></div>
     <div id="home-due" class="card"></div>
-    <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" id="bug-link">Report a bug</a> · <a href="#" id="logout">Log out</a><br><span id="version"></span></p>
+    <p class="muted small foot"><a href="#" data-go="events">History</a> · <a href="#" data-go="usage">Claude usage</a> · <a href="#" id="bug-link">Report a bug</a> · <a href="#" id="logout">Log out</a><br><span id="version"></span></p>
   </section>
 
   <!-- Scan -->
@@ -203,6 +204,20 @@
       <button type="submit">Read receipt</button>
     </form>
     <div id="receipt-result"></div>
+  </section>
+
+  <!-- Claude usage -->
+  <section id="usage" class="panel" hidden>
+    <div id="usage-body"></div>
+    <form id="credit-form" class="card">
+      <h2>Credit balance</h2>
+      <p class="small muted">After a top-up, copy the balance from console.anthropic.com → Billing. The app then
+        subtracts what it spends. (Use of the same key outside Grocy+ isn't counted.)</p>
+      <div class="row">
+        <label>Balance now, $<input name="balance_usd" type="number" inputmode="decimal" min="0" step="0.01" required></label>
+        <button type="submit">Save</button>
+      </div>
+    </form>
   </section>
 
   <!-- Bug report -->

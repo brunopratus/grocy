@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from . import alerts, bugs, mealplan, products, receipts, recipes, reports, stock
+from . import alerts, bugs, mealplan, products, receipts, recipes, reports, stock, usage
 from .deps import Services
 from .setup import run_setup
 
@@ -235,8 +235,18 @@ async def nutrition_search(request: Request, q: str, fi: str | None = None) -> l
 
 
 @router.get("/usage")
-async def usage(request: Request, since: str | None = None) -> dict[str, Any]:
+async def usage_raw(request: Request, since: str | None = None) -> dict[str, Any]:
     return svc_of(request).db.claude_usage(since)
+
+
+@router.get("/usage/summary")
+async def usage_summary(request: Request) -> dict[str, Any]:
+    return usage.summary(svc_of(request))
+
+
+@router.post("/usage/credit")
+async def usage_credit(body: usage.CreditIn, request: Request) -> dict[str, Any]:
+    return usage.set_credit(svc_of(request), body)
 
 
 # --- meal plan -----------------------------------------------------------------------

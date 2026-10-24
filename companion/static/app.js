@@ -7,7 +7,7 @@ const eur = (v) => (v == null ? "–" : `€${Number(v).toFixed(2)}`);
 
 const TITLES = {
   home: "Grocy+", scan: "Scan barcode", label: "Nutrition label", produce: "Market produce", weigh: "Weigh item",
-  cook: "Cook recipe", stock: "Your stock", due: "Open / due", receipt: "Finish shopping", bug: "Report a bug", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
+  cook: "Cook recipe", stock: "Your stock", due: "Open / due", receipt: "Finish shopping", usage: "Claude usage", bug: "Report a bug", plan: "Week plan", report: "Weekly report", events: "History", login: "Grocy+",
 };
 let lookups = { products: [], recipes: [], stores: [], locations: [] };
 
@@ -74,9 +74,10 @@ function show(id) {
   if (id === "scan" && receiptCtx != null) startScan().catch(() => {});
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
-  if (id === "home") loadHomeDue();
+  if (id === "home") { loadHomeDue(); loadCreditWarning(); }
   if (id === "receipt") openFinishShopping();
   if (id === "stock") loadStock();
+  if (id === "usage") loadUsage();
   if (location.hash !== `#${id}` && id !== "login") history.pushState(null, "", `#${id}`);
 }
 
@@ -595,6 +596,48 @@ async function sendBugReport(e) {
   $("#bug-back").addEventListener("click", () => show(lastScreen || "home"));
 }
 
+// --- Claude usage --------------------------------------------------------------------------
+const usd = (v) => (v > 0 && v < 0.001 ? "<$0.001" : `$${Number(v || 0).toFixed(v >= 1 || !v ? 2 : 3)}`);
+
+function creditHtml(c) {
+  if (!c) return `<p class="small muted">Enter your credit balance below to see what's left.</p>`;
+  const used = Math.min(100, (c.spent_since_usd / (c.balance_usd || 1)) * 100);
+  return `<div class="credit ${c.low ? "low" : ""}"><span class="small muted">Credit left (estimate)</span>
+    <strong>${usd(c.remaining_usd)}</strong>
+    <div class="bar"><i style="width:${100 - used}%"></i></div>
+    <span class="small muted">${usd(c.balance_usd)} on ${esc(c.since.slice(0, 10))} − ${usd(c.spent_since_usd)} used since</span>
+    ${c.low ? '<p class="small bad">Running low: top up at console.anthropic.com → Billing, then enter the new balance below.</p>' : ""}</div>`;
+}
+
+async function loadUsage() {
+  const u = await api("/usage/summary");
+  const max = Math.max(...u.days.map((d) => d.cost_usd), 0.0001);
+  const bars = u.days.map((d) => `<div class="day" title="${d.date}: ${usd(d.cost_usd)}, ${d.calls} calls">
+    <i style="height:${Math.max(d.cost_usd ? 4 : 0, (d.cost_usd / max) * 100)}%"></i></div>`).join("");
+  $("#usage-body").innerHTML = `<div class="card">${creditHtml(u.credit)}
+      <div class="stats"><div><b>${usd(u.today_usd)}</b><span>today</span></div>
+        <div><b>${usd(u.month_usd)}</b><span>this month</span></div>
+        <div><b>${u.calls_30_days}</b><span>calls, 30 days</span></div></div></div>
+    <div class="card"><h2>Last 30 days <span class="badge">${usd(u.last_30_days_usd)}</span></h2>
+      <div class="chart">${bars}</div>
+      <div class="chart-axis small muted"><span>${u.days[0].date.slice(5)}</span><span>today</span></div></div>
+    <div class="card"><h2>What it was used for</h2>${u.by_task.length ? `<table>
+      <tr><th>Task</th><th class="num">Calls</th><th class="num">Each</th><th class="num">Total</th></tr>
+      ${u.by_task.map((t) => `<tr><td>${esc(t.name)}</td><td class="num">${t.calls}</td><td class="num">${usd(t.avg_usd)}</td><td class="num">${usd(t.cost_usd)}</td></tr>`).join("")}
+      </table>` : '<p class="muted">No Claude calls in the last 30 days.</p>'}</div>`;
+}
+
+async function loadCreditWarning() {
+  try {
+    const u = await api("/usage/summary");
+    const c = u.credit;
+    $("#credit-warn").hidden = !c?.low;
+    if (c?.low) $("#credit-warn").innerHTML = `<strong>Claude credit low: about ${usd(c.remaining_usd)} left.</strong>
+      <span class="small">Top up at console.anthropic.com, then update it in <a href="#" data-go="usage">Claude usage</a>.</span>`;
+    $$("#credit-warn [data-go]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); show(b.dataset.go); }));
+  } catch { /* not important enough to bother the user */ }
+}
+
 // --- wiring ------------------------------------------------------------------------------
 function on(sel, ev, fn) {
   $(sel).addEventListener(ev, async (e) => {
@@ -611,6 +654,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
+  on("#credit-form", "submit", async (e) => {
+    await api("/usage/credit", { method: "POST", json: { balance_usd: Number(e.target.balance_usd.value) } });
+    e.target.reset();
+    toast("Balance saved");
+    await loadUsage();
+  });
   on("#bug-btn", "click", openBugReport);
   on("#bug-link", "click", (e) => { e.preventDefault(); return openBugReport(); });
   on("#bug-form", "submit", sendBugReport);

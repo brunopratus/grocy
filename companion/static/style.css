@@ -218,3 +218,21 @@ label.unit { flex: 0 0 5.5rem; }
 header #bug-btn { margin-left: auto; color: var(--muted); }
 img.shot { display: block; width: 45%; margin: .3rem 0 .9rem; border: 1px solid var(--line-strong); border-radius: 10px; }
 #version { font-family: var(--mono); font-size: .68rem; opacity: .7; }
+
+/* Claude usage */
+.credit { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; }
+.credit strong { font-size: 2.2rem; font-weight: 600; letter-spacing: -0.03em; color: var(--accent); line-height: 1.1; }
+.credit.low strong { color: var(--bad); }
+.credit .bar { height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.credit .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.credit.low .bar i { background: var(--bad); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+.stats div { display: flex; flex-direction: column; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; }
+.stats b { font-size: 1.15rem; font-weight: 600; color: var(--strong); }
+.stats span { font-size: .75rem; color: var(--muted); }
+.chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: .4rem; border-bottom: 1px solid var(--line); }
+.chart .day { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.chart .day i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; opacity: .85; }
+.chart-axis { display: flex; justify-content: space-between; margin-top: .3rem; font-family: var(--mono); }
+.warn-card { border-color: rgba(255, 122, 89, 0.45) !important; background: rgba(255, 122, 89, 0.08) !important; }
+.warn-card strong { display: block; color: var(--bad); margin-bottom: .2rem; }

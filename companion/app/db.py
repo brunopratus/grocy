@@ -194,6 +194,15 @@ class Database:
             rows = [dict(r) for r in self._conn.execute(sql, args).fetchall()]
         return {"by_task": rows, "total_cost_usd": round(sum(r["cost_usd"] or 0 for r in rows), 4)}
 
+    def claude_daily(self, since: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT substr(ts, 1, 10) AS day, COUNT(*) AS calls, SUM(cost_usd) AS cost_usd FROM claude_calls"
+                " WHERE ts >= ? GROUP BY day ORDER BY day",
+                (since,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def save_plan(self, week_start: str, dry_run: bool, plan: dict[str, Any], summary: dict[str, Any]) -> int:
         with self._lock:
             cur = self._conn.execute(
