@@ -383,6 +383,7 @@ async def use(svc: Services, product_id: int, body: UseIn) -> dict[str, Any]:
 async def inventory(svc: Services) -> list[dict[str, Any]]:
     """Everything in stock, for the phone's inventory list and quick search."""
     today = date.today()
+    was = svc.db.kv_prefix("original_name:")
     items = []
     for s in await svc.grocy.stock():
         product = s["product"]
@@ -395,6 +396,7 @@ async def inventory(svc: Services) -> list[dict[str, Any]]:
             {
                 "product_id": int(s["product_id"]),
                 "name": product["name"],
+                "was": was.get(f"original_name:{int(s['product_id'])}"),  # searchable by its old name too
                 "amount": amount,
                 "unit": unit,
                 "kind": _kind(unit),
@@ -437,3 +439,79 @@ async def open_product(svc: Services, product_id: int) -> dict[str, Any]:
     message = f"Opened {fmt_amount(amount, unit)} {product['name']}, {_due_text(due)}"
     svc.db.add_event("opened", message, product_id=product_id, product_name=product["name"])
     return {"message": message, "due": due}
+
+
+# --- editing what's in stock (tap an item in the stock list) ----------------------------------
+
+
+async def entries(svc: Services, product_id: int) -> dict[str, Any]:
+    """The product and each pack/entry in stock: amount, best before, place, opened."""
+    product = await svc.grocy.object("products", product_id)
+    unit = svc.catalog.unit_of(product.get("qu_id_stock"))
+    rows = []
+    for e in sorted(await svc.grocy.stock_entries(product_id), key=lambda e: e.get("best_before_date") or ""):
+        due = e.get("best_before_date")
+        rows.append(
+            {
+                "id": int(e["id"]),
+                "amount": float(e["amount"]),
+                "amount_text": fmt_amount(float(e["amount"]), unit),
+                "best_before": due if due and not due.startswith("2999") else None,
+                "opened": bool(int(e.get("open") or 0)),
+                "location": svc.catalog.location_name(e.get("location_id")),
+            }
+        )
+    return {"product": {"id": product_id, "name": product["name"], "unit": unit}, "entries": rows}
+
+
+class EntryEdit(BaseModel):
+    amount: float = Field(ge=0, description="New amount in the stock unit; 0 removes the entry")
+    best_before: date | None = Field(None, description="Empty: no date")
+    location: str | None = Field(None, description="Fridge, Freezer or Pantry")
+    opened: bool = False
+
+
+async def edit_entry(svc: Services, product_id: int, entry_id: int, body: EntryEdit) -> dict[str, Any]:
+    product = await svc.grocy.object("products", product_id)
+    unit = svc.catalog.unit_of(product.get("qu_id_stock"))
+    entry = next((e for e in await svc.grocy.stock_entries(product_id) if int(e["id"]) == entry_id), None)
+    if entry is None:
+        raise CaptureError("That item isn't in stock any more: reload the list")
+    if body.amount <= EPS:
+        await svc.grocy.consume_stock(product_id, float(entry["amount"]), stock_entry_id=entry["stock_id"])
+        message = f"Removed {fmt_amount(float(entry['amount']), unit)} {product['name']} from stock"
+    else:
+        await svc.grocy.edit_stock_entry(
+            entry_id,
+            {
+                "amount": body.amount,
+                "best_before_date": body.best_before.isoformat() if body.best_before else NEVER,
+                "location_id": svc.catalog.location_id(body.location) if body.location else entry.get("location_id"),
+                "shopping_location_id": entry.get("shopping_location_id"),
+                "price": entry.get("price"),
+                "open": 1 if body.opened else 0,
+                "purchased_date": entry.get("purchased_date"),
+                "note": entry.get("note"),
+            },
+        )
+        message = f"Saved {product['name']}: {fmt_amount(body.amount, unit)}"
+    svc.db.add_event("edited", message, product_id=product_id, product_name=product["name"])
+    return {"message": message, **await entries(svc, product_id)}
+
+
+class RenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+async def rename(svc: Services, product_id: int, body: RenameIn) -> dict[str, Any]:
+    product = await svc.grocy.object("products", product_id)
+    new = body.name.strip()
+    others = {p["name"].strip().lower() for p in await svc.products() if int(p["id"]) != product_id}
+    if new.lower() in others:
+        raise CaptureError(f"Another product is already called '{new}'")
+    key = f"original_name:{product_id}"
+    if not svc.db.get_kv(key):
+        svc.db.set_kv(key, product["name"])  # the old name still matches receipts
+    await svc.grocy.edit_object("products", product_id, {"name": new})
+    svc.db.add_event("renamed", f"Renamed '{product['name']}' to '{new}'", product_id=product_id, product_name=new)
+    return {"message": f"Renamed to {new}", "name": new}

@@ -301,3 +301,19 @@ img.shot { display: block; width: 45%; margin: .3rem 0 .9rem; border: 1px solid 
 .viewfinder[data-state="got"] .vf-status { color: #7BE07B; font-weight: 600; }
 #scan-box { border-radius: 14px; }
 .viewfinder[data-state="got"] video { visibility: hidden; }
+
+/* Stock list: tap a name to edit it */
+button.sname { all: unset; cursor: pointer; font-weight: 600; color: var(--strong); display: inline-flex; gap: .4rem; align-items: baseline; }
+button.sname .pen { color: var(--muted); font-size: .8rem; font-weight: 400; }
+button.sname:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.edit form.ename { margin-top: 0; }
+.edit form.ename input { margin: 0; }
+.edit form.eentry { margin-top: .9rem; padding-top: .8rem; border-top: 1px dashed var(--line-strong); }
+.edit .erow { display: flex; align-items: flex-end; gap: .5rem; }
+.edit .erow label { margin: 0; font-size: .85rem; }
+.edit .erow input { width: 6rem; margin-top: .25rem; }
+.edit .erow select { width: auto; margin-top: .25rem; }
+.edit .eunit { padding-bottom: .8rem; color: var(--muted); font-size: .9rem; }
+.edit .rbb { display: flex; align-items: center; gap: .5rem; margin: .6rem 0 0; font-size: .85rem; color: var(--muted); }
+.edit label.check { margin: .6rem 0 .2rem; }
+.edit .row button { margin-bottom: 0; }

@@ -145,6 +145,10 @@ class FakeGrocy(GrocyClient):
         self.product_stock[product_id] = self.product_stock.get(product_id, 0) + amount
         return [{"transaction_id": "tx-add"}]
 
+    async def edit_stock_entry(self, entry_id: int, body: dict[str, Any]) -> Any:
+        self.calls.append(("edit_entry", entry_id, body))
+        return [{"transaction_id": "tx-edit"}]
+
     async def consume_stock(self, product_id: int, amount: float, **extra: Any) -> Any:
         self.calls.append(("consume", product_id, amount, extra.get("stock_entry_id")))
         return [{"transaction_id": "tx-consume"}]

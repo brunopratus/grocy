@@ -850,10 +850,49 @@ function useHtml(i) {
     <button type="button" class="secondary danger" data-finish="${i.product_id}">Finished it (none left)</button></div>`;
 }
 
+// Tap an item: fix its name, or each pack's amount, date, place and opened state
+let editOpen = null, editData = null;
+function editHtml() {
+  if (!editData) return `<div class="use edit"><p class="small muted">Loading…</p></div>`;
+  const { product, entries } = editData;
+  const many = entries.length > 1;
+  const forms = entries.map((e, n) => `<form class="eentry" data-entry="${e.id}">
+      ${many ? `<h3>Pack ${n + 1} of ${entries.length}</h3>` : ""}
+      <div class="erow"><label>Amount<input name="amount" type="text" inputmode="decimal" autocomplete="off" value="${+e.amount.toFixed(3)}"></label>
+        <span class="eunit">${esc(product.unit)}</span>
+        <label>Where<select name="location">${LOCATIONS.map((x) => `<option${x === e.location ? " selected" : ""}>${x}</option>`).join("")}</select></label></div>
+      <label class="rbb">Best before${dateField('name="best_before"', e.best_before)}</label>
+      <label class="check"><input type="checkbox" name="opened"${e.opened ? " checked" : ""}> Opened</label>
+      <div class="row"><button type="submit">Save</button><button type="button" class="secondary danger" data-remove="${e.id}">Remove</button></div>
+    </form>`).join("");
+  return `<div class="use edit" data-id="${product.id}">
+    <form class="ename row" data-id="${product.id}"><input name="name" value="${esc(product.name)}" aria-label="Name" autocomplete="off"><button type="submit" class="secondary">Rename</button></form>
+    ${forms || `<p class="small muted">Nothing of it in stock.</p>`}</div>`;
+}
+
+async function openEdit(id) {
+  useOpen = null;
+  editOpen = editOpen === id ? null : id;
+  editData = null;
+  renderStock();
+  if (editOpen == null) return;
+  try { editData = await api(`/stock/${id}/entries`); } catch (err) { editOpen = null; toast(err.message, 6000); }
+  renderStock();
+}
+
 async function useProduct(id, body) {
   const r = await api(`/stock/${id}/use`, { method: "POST", json: body, busy: "Saving…" });
   toast(r.message, 5000);
   stockItems = await api("/stock/all");
+  renderStock();
+}
+
+async function saveEntry(entryId, body) {
+  const r = await api(`/stock/${editOpen}/entries/${entryId}`, { method: "PUT", json: body, busy: "Saving…" });
+  toast(r.message, 5000);
+  editData = r;
+  stockItems = await api("/stock/all");
+  if (!r.entries.length) editOpen = null;
   renderStock();
 }
 
@@ -865,7 +904,7 @@ async function loadStock() {
 
 function renderStock() {
   const q = $("#stock-q").value.trim().toLowerCase();
-  const items = stockItems.filter((i) => !q || i.name.toLowerCase().includes(q));
+  const items = stockItems.filter((i) => !q || `${i.name} ${i.was || ""}`.toLowerCase().includes(q));
   const value = stockItems.reduce((a, i) => a + i.value_eur, 0);
   $("#stock-sum").textContent = q ? `${items.length} of ${stockItems.length} products` : `${stockItems.length} products · ${eur(value)} total value`;
   const groups = {};
@@ -874,11 +913,11 @@ function renderStock() {
     const d = i.days_left;
     const cls = d == null ? "" : d < 0 ? "bad" : d <= 2 ? "warn" : "";
     const when = d == null ? "" : d < 0 ? `${-d} d overdue` : d === 0 ? "due today" : `${d} d left`;
-    return `<div class="sitem"><strong>${esc(i.name)}</strong><span class="num">${esc(i.amount_text)}</span></div>
+    return `<div class="sitem"><button type="button" class="sname" data-edit="${i.product_id}" aria-expanded="${editOpen === i.product_id}">${esc(i.name)}<span class="pen" aria-hidden="true">✎</span></button><span class="num">${esc(i.amount_text)}</span></div>
       <div class="sline"><span class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</span>
       <span class="sbtns"><button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button>
       <button type="button" class="mini${useOpen === i.product_id ? "" : " secondary"}" data-use="${i.product_id}">Use</button></span></div>
-      ${useOpen === i.product_id ? useHtml(i) : ""}`;
+      ${useOpen === i.product_id ? useHtml(i) : ""}${editOpen === i.product_id ? editHtml() : ""}`;
   }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
 }
 
@@ -1014,7 +1053,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#stock-q").addEventListener("input", renderStock);
   $("#stock-list").addEventListener("click", async (e) => {
     const u = e.target.closest("button[data-use]");
-    if (u) { useOpen = useOpen === Number(u.dataset.use) ? null : Number(u.dataset.use); return renderStock(); }
+    if (u) { editOpen = null; useOpen = useOpen === Number(u.dataset.use) ? null : Number(u.dataset.use); return renderStock(); }
+    const ed = e.target.closest("button[data-edit]");
+    if (ed) return openEdit(Number(ed.dataset.edit));
+    const rm = e.target.closest("button[data-remove]");
+    if (rm) {
+      if (!confirm("Remove this from stock? (Use it when it isn't at home any more.)")) return;
+      try { return await saveEntry(Number(rm.dataset.remove), { amount: 0 }); } catch (err) { return toast(err.message, 6000); }
+    }
     const id = Number(e.target.closest(".use")?.dataset.id);
     try {
       const pr = e.target.closest("button[data-preset]");
@@ -1043,6 +1089,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     const f = e.target;
     const id = Number(f.dataset.id);
     try {
+      if (f.classList.contains("eentry")) {
+        const amount = num(f.amount.value);
+        if (!(amount >= 0) || !f.amount.value.trim()) return toast("Type the amount");
+        if (amount === 0 && !confirm("Amount 0 removes it from stock. Go on?")) return;
+        return await saveEntry(Number(f.dataset.entry), {
+          amount, best_before: f.best_before.value || null, location: f.location.value, opened: f.opened.checked,
+        });
+      }
+      if (f.classList.contains("ename")) {
+        const r = await api(`/products/${id}/name`, { method: "POST", json: { name: f.name.value.trim() }, busy: "Saving…" });
+        toast(r.message);
+        editData.product.name = r.name;
+        await refreshLookups();
+        stockItems = await api("/stock/all");
+        return renderStock();
+      }
       if (f.classList.contains("use-other")) {
         const amount = num(f.amount.value);
         if (!(amount > 0)) return toast("How much?");

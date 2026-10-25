@@ -112,6 +112,9 @@ class GrocyClient:
             body["stock_entry_id"] = stock_entry_id
         return await self.post(f"/stock/products/{product_id}/open", body)
 
+    async def edit_stock_entry(self, entry_id: int, body: dict[str, Any]) -> Any:
+        return await self.put(f"/stock/entry/{entry_id}", body)
+
     async def inventory(self, product_id: int, new_amount: float, **extra: Any) -> Any:
         body = {"new_amount": new_amount, **{k: v for k, v in extra.items() if v is not None}}
         return await self.post(f"/stock/products/{product_id}/inventory", body)

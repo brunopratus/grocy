@@ -90,6 +90,7 @@ async def test_inventory_lists_stock(settings, catalog, fake_grocy):
         {
             "product_id": 5,
             "name": "Kefyras",
+            "was": None,
             "amount": 2.0,
             "unit": "piece",
             "kind": "count",

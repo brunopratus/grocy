@@ -57,3 +57,34 @@ async def test_weigh_open_bottle_keeps_the_unopened_one(settings, catalog, fake_
     res = await weigh(svc, 4, WeighIn(grams_measured=442, includes_container=True, container_g=30))
     assert res["amount"] == 1400 and ("consume", 4, 200, "open") in fake_grocy.calls
     assert "Pienas: weighed 400 ml" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_edit_rename_and_remove_from_the_stock_list(settings, catalog, fake_grocy):
+    from app.stock import EntryEdit, RenameIn, edit_entry, entries, rename
+
+    fake_grocy.seed("products", {"id": 4, "name": "Pienas", "qu_id_stock": QU["ml"]})
+    fake_grocy.seed("products", {"id": 5, "name": "Eggs", "qu_id_stock": QU["piece"]})
+    row = {"id": 7, "stock_id": "s7", "product_id": 4, "amount": 1000, "open": 0, "location_id": 1}
+    fake_grocy.seed("stock", {**row, "best_before_date": "2026-11-01", "purchased_date": "2026-10-25", "price": 1.2})
+    svc = make_services(settings, catalog, fake_grocy)
+    e = await entries(svc, 4)
+    assert e["entries"][0] == {
+        "id": 7,
+        "amount": 1000.0,
+        "amount_text": "1 l",
+        "best_before": "2026-11-01",
+        "opened": False,
+        "location": "Fridge",
+    }
+    r = await edit_entry(svc, 4, 7, EntryEdit(amount=600, best_before=None, location="Pantry", opened=True))
+    body = next(c for c in fake_grocy.calls if c[0] == "edit_entry")[2]
+    assert body["amount"] == 600 and body["open"] == 1 and body["location_id"] == 3
+    assert body["best_before_date"] == "2999-12-31" and body["purchased_date"] == "2026-10-25" and body["price"] == 1.2
+    assert r["message"] == "Saved Pienas: 600 ml"
+    await edit_entry(svc, 4, 7, EntryEdit(amount=0))
+    assert ("consume", 4, 1000.0, "s7") in fake_grocy.calls
+    with pytest.raises(Exception, match="already called"):
+        await rename(svc, 4, RenameIn(name="eggs"))
+    assert (await rename(svc, 4, RenameIn(name="Milk 2.5%")))["name"] == "Milk 2.5%"
+    assert svc.db.get_kv("original_name:4") == "Pienas"
