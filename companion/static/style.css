@@ -259,3 +259,20 @@ img.shot { display: block; width: 45%; margin: .3rem 0 .9rem; border: 1px solid 
 .first-step a { display: block; text-align: center; margin-top: .6rem; }
 .radd form.rname input { flex: 3 1 0; }
 .radd form.rname button { flex: 0 0 auto; padding-left: 1.2rem; padding-right: 1.2rem; }
+
+/* Quick use from the stock list */
+.sbtns { display: flex; gap: .4rem; }
+.use { margin: .7rem 0 .3rem; padding: .8rem; border: 1px solid var(--line-strong); border-radius: 14px; }
+.use .presets { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.use .presets button { display: flex; flex-direction: column; align-items: center; padding: .6rem .4rem; font-size: .95rem; }
+.use .presets small { color: var(--muted); font-size: .75rem; margin-top: .1rem; }
+.use form { margin-top: .8rem; }
+.use form.row input, .use form .row input { margin: 0; }
+.use form.row select { width: auto; margin: 0; flex: 0 0 auto; }
+.use form button { margin-bottom: 0; }
+.use h3 { margin: 0 0 .4rem; font-size: .95rem; }
+.use label.check { margin: .6rem 0 0; font-size: .9rem; }
+.use .ucont { margin-top: .5rem; font-size: .85rem; }
+.use > button.danger { width: 100%; margin-top: .9rem; }
+.rcont { display: flex; align-items: center; gap: .4rem; margin-top: .45rem; font-size: .85rem; color: var(--muted); }
+.rcont input { width: 4.5rem; min-height: 36px; margin: 0; padding: .3rem .5rem; }

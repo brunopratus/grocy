@@ -13,7 +13,7 @@ from .deps import Services
 from .grocy import GrocyError
 from .nutrition import Per100, Totals, nutrients_for
 from .products import CaptureError, net_of
-from .units import UnitError, convert, fmt_amount, normalize_unit
+from .units import UnitError, convert, convert_food, density, dimension, fmt_amount, normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -219,7 +219,9 @@ class WeighIn(BaseModel):
     includes_container: bool | None = Field(
         None, description="Weight includes the jar/container. Default: true if tare handling is enabled"
     )
-    container_g: float | None = Field(None, ge=0, description="Container weight when tare handling is off")
+    container_g: float | None = Field(
+        None, ge=0, description="Container weight when tare handling is off (remembered for the product)"
+    )
 
 
 async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]:
@@ -233,8 +235,10 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
         raise CaptureError(f"Stock unit '{unit}' cannot be weighed") from e
     if dim_unit in ("piece", "pack"):
         raise CaptureError(f"{prod['name']} is counted in {unit}s; weighing needs a g or ml stock unit")
+    d = density(prod["name"])
     if dim_unit in ("ml", "l", "cl", "dl"):
-        notes.append("Volume product: assuming 1 g ≈ 1 ml")
+        notes.append(f"Weight to volume: 1 g ≈ {round(1 / d, 2)} ml for {prod['name']}")
+    container_key = f"container_g:{product_id}"
 
     tare_enabled = bool(int(prod.get("enable_tare_weight_handling") or 0))
     tare = float(prod.get("tare_weight") or 0)
@@ -244,9 +248,14 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
     if tare_enabled:
         gross_g = body.grams_measured if includes else body.grams_measured + tare
         net_g = gross_g - tare
-        new_for_grocy = convert(gross_g, "g", "kg") if dim_unit == "kg" else gross_g  # Grocy expects gross
+        new_for_grocy = convert_food(gross_g, "g", dim_unit, name=prod["name"])  # Grocy expects gross
     else:
         if includes:
+            if body.container_g is not None:
+                svc.db.set_kv(container_key, str(body.container_g))  # weighed once, remembered
+            else:
+                saved = svc.db.get_kv(container_key)
+                body.container_g = float(saved) if saved else None
             if body.container_g is None:
                 raise CaptureError(
                     "Weight includes the container: give container_g or enable tare weight handling on the product"
@@ -258,10 +267,20 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
     if net_g < -EPS:
         raise CaptureError("Measured weight is below the container weight")
     net_g = max(net_g, 0.0)
-    base_unit = "g" if dim_unit in ("g", "kg", "mg") else "ml"
-    new_amount = convert(net_g, "g" if base_unit == "g" else "ml", dim_unit)
+    new_amount = _tidy(convert_food(net_g, "g", dim_unit, name=prod["name"]), dim_unit)
     if new_for_grocy is None:
         new_for_grocy = new_amount
+
+    # The open bottle was weighed: unopened packs on the shelf are still there, and what was used
+    # comes out of the open one
+    entries = await svc.grocy.stock_entries(product_id)
+    opened = [e for e in entries if int(e.get("open") or 0)]
+    sealed = sum(float(e["amount"]) for e in entries if not int(e.get("open") or 0))
+    weighed = new_amount
+    if opened and sealed:
+        new_amount += sealed
+        new_for_grocy += sealed
+        notes.append(f"The open one has {fmt_amount(weighed, unit)}, plus {fmt_amount(sealed, unit)} unopened")
 
     diff = new_amount - before
     if abs(diff) < 0.01:
@@ -273,11 +292,15 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
             "message": f"{prod['name']}: unchanged at {fmt_amount(before, unit)}",
             "notes": notes,
         }
-    res = await svc.grocy.inventory(product_id, round(new_for_grocy, 3))
+    open_entry = min(opened, key=lambda e: e.get("best_before_date") or "9999") if opened else None
+    if open_entry and not tare_enabled and diff < 0 and -diff <= float(open_entry["amount"]) + EPS:
+        res = await svc.grocy.consume_stock(product_id, round(-diff, 4), stock_entry_id=open_entry["stock_id"])
+    else:
+        res = await svc.grocy.inventory(product_id, round(new_for_grocy, 3))
     tx = res[0]["transaction_id"] if isinstance(res, list) and res else None
     verb = "used/lost" if diff < 0 else "more than recorded"
     msg = (
-        f"{prod['name']}: weighed {fmt_amount(new_amount, unit)} "
+        f"{prod['name']}: weighed {fmt_amount(weighed, unit)} "
         f"(was {fmt_amount(before, unit)}, {fmt_amount(abs(diff), unit)} {verb})"
     )
     svc.db.add_event(
@@ -296,10 +319,65 @@ async def weigh(svc: Services, product_id: int, body: WeighIn) -> dict[str, Any]
         "amount": new_amount,
         "difference": diff,
         "unit": unit,
+        "container_g": body.container_g,
         "transaction_id": tx,
         "message": msg,
         "notes": notes,
     }
+
+
+def _tidy(amount: float, unit: str) -> float:
+    """Whole g / ml (a scale isn't more precise than that); 3 decimals for kg / l."""
+    return round(amount, 3) if unit in ("kg", "l", "dl", "cl") else round(amount)
+
+
+def _kind(unit: str) -> str:
+    try:
+        return dimension(unit)
+    except UnitError:
+        return "count"  # the product's own Grocy unit ("Bottle")
+
+
+class UseIn(BaseModel):
+    amount: float | None = Field(None, gt=0, description="How much was used, in `unit`")
+    unit: str | None = Field(None, description="g, ml, piece, ... Default: the stock unit")
+    all: bool = Field(False, description="Finished it: use up everything in stock")
+
+
+async def use(svc: Services, product_id: int, body: UseIn) -> dict[str, Any]:
+    """Quick use from the stock list ('a dash of milk'): consume from the opened pack, opening one if needed."""
+    product = await svc.grocy.object("products", product_id)
+    name, unit = product["name"], svc.catalog.unit_of(product.get("qu_id_stock"))
+    entries = await svc.grocy.stock_entries(product_id)
+    have = sum(float(e["amount"]) for e in entries)
+    if have <= EPS:
+        raise CaptureError(f"{name}: nothing in stock")
+    if body.all:
+        amount = have
+    else:
+        if body.amount is None:
+            raise CaptureError("How much was used?")
+        net, net_unit = net_of(await svc.grocy.userfields("products", product_id))
+        try:
+            amount = convert_food(
+                body.amount, body.unit or unit, unit, name=name, net_amount_per_pack=net, net_unit=net_unit
+            )
+        except UnitError as e:
+            raise CaptureError(str(e)) from e
+        amount = min(amount, have)
+        if _kind(unit) != "count" and not any(int(e.get("open") or 0) for e in entries) and amount < have - EPS:
+            await open_product(svc, product_id)  # poured from a new pack: that pack is now open
+            entries = await svc.grocy.stock_entries(product_id)
+    opened = [e for e in entries if int(e.get("open") or 0)]
+    entry = min(opened, key=lambda e: e.get("best_before_date") or "9999") if opened else None
+    entry_id = entry["stock_id"] if entry and amount <= float(entry["amount"]) + EPS else None
+    await svc.grocy.consume_stock(product_id, round(amount, 4), stock_entry_id=entry_id)
+    left = max(have - amount, 0.0)
+    message = (
+        f"Finished {name}" if left <= EPS else f"Used {fmt_amount(amount, unit)} {name} · {fmt_amount(left, unit)} left"
+    )
+    svc.db.add_event("used", message, product_id=product_id, product_name=name, amount=amount, unit=unit)
+    return {"message": message, "left": left, "unit": unit}
 
 
 async def inventory(svc: Services) -> list[dict[str, Any]]:
@@ -317,6 +395,10 @@ async def inventory(svc: Services) -> list[dict[str, Any]]:
             {
                 "product_id": int(s["product_id"]),
                 "name": product["name"],
+                "amount": amount,
+                "unit": unit,
+                "kind": _kind(unit),
+                "container_g": float(c) if (c := svc.db.get_kv(f"container_g:{int(s['product_id'])}")) else None,
                 "amount_text": fmt_amount(amount, unit),
                 "opened_text": fmt_amount(opened, unit) if opened else None,
                 "location": svc.catalog.location_name(product.get("location_id")),

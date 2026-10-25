@@ -25,7 +25,7 @@ from .nutrition import (
     usda_candidate,
     usda_search,
 )
-from .units import UnitError, convert, fmt_amount, normalize_unit
+from .units import UnitError, convert, convert_food, fmt_amount, normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -817,7 +817,9 @@ async def add_stock(svc: Services, body: StockAddIn) -> dict[str, Any]:
         if unit.strip().lower() == str(stock_unit).strip().lower():
             amount = body.amount
         else:
-            amount = convert(body.amount, unit, stock_unit, net_amount_per_pack=net, net_unit=net_unit)
+            amount = convert_food(
+                body.amount, unit, stock_unit, name=product["name"], net_amount_per_pack=net, net_unit=net_unit
+            )
     except UnitError as e:
         raise CaptureError(str(e)) from e
     return await _book_purchase(svc, product, amount, body.price_total, body.store, body.best_before, body.location)

@@ -212,6 +212,11 @@ async def open_product(product_id: int, request: Request) -> dict[str, Any]:
     return await stock.open_product(svc_of(request), product_id)
 
 
+@router.post("/stock/{product_id}/use")
+async def use_product(product_id: int, body: stock.UseIn, request: Request) -> dict[str, Any]:
+    return await stock.use(svc_of(request), product_id, body)
+
+
 @router.get("/stock/open-due")
 async def open_due(request: Request, days: int | None = Query(None, ge=0, le=60)) -> list[dict[str, Any]]:
     return await alerts.open_and_due(svc_of(request), days)

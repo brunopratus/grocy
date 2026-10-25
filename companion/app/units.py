@@ -209,3 +209,43 @@ def fmt_amount(amount: float, unit: str) -> str:
     if u in ("piece", "pack"):
         return f"{amount:g} {u if amount == 1 else u + 's'}"
     return f"{round(amount, 1):g} {u}"
+
+
+# Grams per ml of foods that are stocked by volume but easiest to weigh (matched on the product name,
+# Lithuanian or English; first match wins, so the more specific names come first). Anything else: 1.0.
+DENSITIES: list[tuple[tuple[str, ...], float]] = [
+    (("grietinėl", "cream"), 1.0),
+    (("grietin", "sour cream", "jogurt", "yogurt", "yoghurt"), 1.04),
+    (("aliej", "oil"), 0.92),
+    (("medus", "honey"), 1.42),
+    (("sirup", "syrup"), 1.33),
+    (("pien", "milk", "kefyr", "kefir", "pasuk"), 1.03),
+    (("sult", "juice", "nektar"), 1.05),
+    (("padaž", "sauce", "kečup", "ketchup"), 1.1),
+]
+
+
+def density(name: str) -> float:
+    n = name.lower()
+    return next((d for words, d in DENSITIES if any(w in n for w in words)), 1.0)
+
+
+def convert_food(
+    amount: float,
+    from_unit: str,
+    to_unit: str,
+    *,
+    name: str = "",
+    net_amount_per_pack: float | None = None,
+    net_unit: str | None = None,
+) -> float:
+    """Like convert(), plus weight <-> volume using the food's density (e.g. weighed milk -> ml)."""
+    try:
+        return convert(amount, from_unit, to_unit, net_amount_per_pack=net_amount_per_pack, net_unit=net_unit)
+    except UnitError:
+        fd, ff = CANONICAL[normalize_unit(from_unit)]
+        td, tf = CANONICAL[normalize_unit(to_unit)]
+        if {fd, td} != {"mass", "volume"}:
+            raise
+        base = float(amount) * ff  # g or ml
+        return round(base / density(name) if fd == "mass" else base * density(name)) / tf  # whole g / ml

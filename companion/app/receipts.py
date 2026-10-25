@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from .claude import compact_json, image_block, pdf_block
 from .deps import Services
 from .products import StockAddIn, add_stock, net_of, set_pack_size, summary
-from .units import UnitError, convert, fmt_amount, normalize_unit
+from .units import UnitError, convert, dimension, fmt_amount, normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,9 @@ class CommitLine(BaseModel):
     opened: bool = Field(False, description="Already opened (home stock-take): one pack/piece, or a weighed amount")
     best_before: date | None = None
     location: str | None = Field(None, description="Fridge, Freezer or Pantry; default: the product's")
+    container_g: float | None = Field(
+        None, ge=0, description="Weighed on a scale with its bottle/jar: the container's weight to take off"
+    )
 
 
 class ReceiptCommitIn(BaseModel):
@@ -179,11 +182,17 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
             except UnitError:
                 pack_unit = "g"
             await set_pack_size(svc, await svc.grocy.object("products", line.product_id), line.pack_size, pack_unit)
+        quantity = line.quantity
+        if line.container_g is not None and _is_weight(line.unit):
+            svc.db.set_kv(f"container_g:{line.product_id}", str(line.container_g))  # remembered for weighing later
+            quantity -= convert(line.container_g, "g", line.unit)
+            if quantity <= 0:
+                return {"error": "The weight is not more than the container's"}
         res = await add_stock(
             svc,
             StockAddIn(
                 product_id=line.product_id,
-                amount=line.quantity,
+                amount=quantity,
                 unit=line.unit,
                 price_total=line.line_total_eur,
                 store=store,
@@ -197,6 +206,13 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
         return {"added": message}
     except Exception as e:  # noqa: BLE001 - report per line
         return {"error": str(e)}
+
+
+def _is_weight(unit: str) -> bool:
+    try:
+        return dimension(unit) == "mass"
+    except UnitError:
+        return False
 
 
 async def _open_added(svc: Services, line: CommitLine, res: dict[str, Any]) -> str:

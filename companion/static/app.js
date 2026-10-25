@@ -281,8 +281,10 @@ function amountHtml(l, i) {
     <input class="rpack" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
     <select class="rpunit" data-i="${i}">${pu}</select> <span class="rtotal">${total}</span>`;
   }
+  const cont = ["g", "kg"].includes(l.unit) ? `<label class="rcont">weighed in its bottle / jar? minus
+    <input class="rcontg" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="0" value="${l.container_g ?? ""}"> g</label>` : "";
   return `<div class="ramount"><input class="rqty" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="how much" value="${l.quantity ?? ""}">
-    <select class="runit" data-i="${i}">${units}</select>${pack}</div>`;
+    <select class="runit" data-i="${i}">${units}</select>${pack}</div>${cont}`;
 }
 
 function chip(ok, text, warn) {
@@ -554,6 +556,7 @@ async function commitReceipt() {
     ...(l.opened ? { opened: true } : {}),
     ...(l.best_before ? { best_before: l.best_before } : {}),
     ...(l.location ? { location: l.location } : {}),
+    ...(["g", "kg"].includes(l.unit) && l.container_g ? { container_g: l.container_g } : {}),
   }));
   const store = lastReceipt.mode === "home" ? null : lastReceipt.store;
   const r = await api("/receipts/commit", { method: "POST", json: { store, lines }, busy: "Adding to stock…" });
@@ -579,7 +582,7 @@ function wireReceipt() {
     if (e.target.classList.contains("ropen")) { l.opened = e.target.checked; return saveReceipt(); }
     if (e.target.classList.contains("rbbd")) { l.best_before = e.target.value || null; return saveReceipt(); }
     if (e.target.classList.contains("rloc")) { l.location = e.target.value; return saveReceipt(); }
-    if (["rqty", "rprice"].some((c) => e.target.classList.contains(c))) return;  // handled on "input"
+    if (["rqty", "rprice", "rcontg"].some((c) => e.target.classList.contains(c))) return;  // handled on "input"
     try {
       if (e.target.classList.contains("rinc")) l.include = e.target.checked;
       if (e.target.classList.contains("rpack")) return;  // handled on "input"
@@ -601,6 +604,7 @@ function wireReceipt() {
     if (!l) return;
     if (e.target.classList.contains("rpack")) l.pack_size = num(e.target.value) || null;
     else if (e.target.classList.contains("rqty")) l.quantity = num(e.target.value) || null;
+    else if (e.target.classList.contains("rcontg")) { l.container_g = e.target.value.trim() ? num(e.target.value) : null; return saveReceipt(); }
     else if (e.target.classList.contains("rprice")) { l.line_total_eur = e.target.value.trim() ? num(e.target.value) : null; return saveReceipt(); }
     else return;
     updateReceiptLine(i);
@@ -687,6 +691,41 @@ function renderRecipeCheck(r) {
 // --- stock list and quick search -----------------------------------------------------------
 let stockItems = [];
 
+// Quick use from the stock list: everyday amounts in the right unit, a scale, or "finished it"
+let useOpen = null;
+const PRESETS = {
+  volume: [["Dash in coffee", 20, "ml"], ["Spoon", 15, "ml"], ["Cup", 200, "ml"], ["Glass", 250, "ml"]],
+  mass: [["Teaspoon", 5, "g"], ["Spoon", 15, "g"], ["Handful", 30, "g"], ["100 g", 100, "g"]],
+};
+
+function useHtml(i) {
+  const unitName = (u, n) => (u === "piece" ? (n === 1 ? "piece" : "pieces") : u);
+  const presets = (PRESETS[i.kind] || [["1 " + unitName(i.unit, 1), 1, i.unit], ["½", 0.5, i.unit], ["2", 2, i.unit]])
+    .map(([label, a, u]) => `<button type="button" class="secondary" data-preset="${a}" data-unit="${esc(u)}">${esc(label)}<small>${a} ${esc(unitName(u, a))}</small></button>`).join("");
+  const units = i.kind === "volume" ? ["ml", "l", "g"] : i.kind === "mass" ? ["g", "kg"] : [i.unit];
+  const weigh = i.kind === "count" ? "" : `<form class="use-weigh" data-id="${i.product_id}">
+      <h3>Or weigh what's left</h3>
+      <div class="row"><input name="grams" type="text" inputmode="decimal" autocomplete="off" placeholder="scale shows, g" aria-label="Scale shows, g">
+      <button type="submit" class="secondary">Save</button></div>
+      <label class="check"><input type="checkbox" name="inside"${i.container_g != null ? " checked" : ""}> Weighed in its bottle / jar</label>
+      <label class="ucont"${i.container_g != null ? "" : " hidden"}>Empty bottle / jar weighs, g<input name="container" type="text" inputmode="decimal" autocomplete="off" value="${i.container_g ?? ""}"></label>
+      ${i.kind === "volume" ? `<p class="small muted">Grams are turned into ${esc(i.unit)} for you.</p>` : ""}</form>`;
+  return `<div class="use" data-id="${i.product_id}">
+    <div class="presets">${presets}</div>
+    <form class="use-other row" data-id="${i.product_id}"><input name="amount" type="text" inputmode="decimal" autocomplete="off" placeholder="other" aria-label="Other amount">
+      <select name="unit" aria-label="Unit">${units.map((u) => `<option>${esc(u)}</option>`).join("")}</select>
+      <button type="submit" class="secondary">Use</button></form>
+    ${weigh}
+    <button type="button" class="secondary danger" data-finish="${i.product_id}">Finished it (none left)</button></div>`;
+}
+
+async function useProduct(id, body) {
+  const r = await api(`/stock/${id}/use`, { method: "POST", json: body, busy: "Saving…" });
+  toast(r.message, 5000);
+  stockItems = await api("/stock/all");
+  renderStock();
+}
+
 async function loadStock() {
   stockItems = await api("/stock/all");
   renderStock();
@@ -706,7 +745,9 @@ function renderStock() {
     const when = d == null ? "" : d < 0 ? `${-d} d overdue` : d === 0 ? "due today" : `${d} d left`;
     return `<div class="sitem"><strong>${esc(i.name)}</strong><span class="num">${esc(i.amount_text)}</span></div>
       <div class="sline"><span class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</span>
-      <button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button></div>`;
+      <span class="sbtns"><button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button>
+      <button type="button" class="mini${useOpen === i.product_id ? "" : " secondary"}" data-use="${i.product_id}">Use</button></span></div>
+      ${useOpen === i.product_id ? useHtml(i) : ""}`;
   }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
 }
 
@@ -841,6 +882,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   on("#bug-form", "submit", sendBugReport);
   $("#stock-q").addEventListener("input", renderStock);
   $("#stock-list").addEventListener("click", async (e) => {
+    const u = e.target.closest("button[data-use]");
+    if (u) { useOpen = useOpen === Number(u.dataset.use) ? null : Number(u.dataset.use); return renderStock(); }
+    const id = Number(e.target.closest(".use")?.dataset.id);
+    try {
+      const pr = e.target.closest("button[data-preset]");
+      if (pr) return await useProduct(id, { amount: Number(pr.dataset.preset), unit: pr.dataset.unit });
+      const fin = e.target.closest("button[data-finish]");
+      if (fin) {
+        if (!confirm("None left? It's taken out of stock.")) return;
+        useOpen = null;
+        return await useProduct(id, { all: true });
+      }
+    } catch (err) { return toast(err.message, 6000); }
     const b = e.target.closest("button[data-open]");
     if (!b) return;
     try {
@@ -848,6 +902,31 @@ document.addEventListener("DOMContentLoaded", async () => {
       toast(r.message, 5000);
       stockItems = await api("/stock/all");
       renderStock();
+    } catch (err) { toast(err.message, 6000); }
+  });
+  $("#stock-list").addEventListener("change", (e) => {
+    if (e.target.name === "inside") e.target.form.querySelector(".ucont").hidden = !e.target.checked;
+  });
+  $("#stock-list").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const id = Number(f.dataset.id);
+    try {
+      if (f.classList.contains("use-other")) {
+        const amount = num(f.amount.value);
+        if (!(amount > 0)) return toast("How much?");
+        return await useProduct(id, { amount, unit: f.unit.value });
+      }
+      if (f.classList.contains("use-weigh")) {
+        const grams = num(f.grams.value);
+        if (!(grams >= 0) || !f.grams.value.trim()) return toast("What does the scale show?");
+        const body = { grams_measured: grams, includes_container: f.inside.checked };
+        if (f.inside.checked && f.container.value.trim()) body.container_g = num(f.container.value);
+        const r = await api(`/stock/${id}/weigh`, { method: "POST", json: body, busy: "Saving…" });
+        toast(r.message, 6000);
+        stockItems = await api("/stock/all");
+        return renderStock();
+      }
     } catch (err) { toast(err.message, 6000); }
   });
   window.addEventListener("popstate", () => show(location.hash.slice(1) || "home"));
