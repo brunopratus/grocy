@@ -25,10 +25,16 @@ function remember(kind, entry) {
 window.addEventListener("error", (e) => remember("errors", { js: `${e.message} (${e.filename?.split("/").pop()}:${e.lineno})` }));
 window.addEventListener("unhandledrejection", (e) => remember("errors", { js: String(e.reason?.message || e.reason) }));
 
-function toast(msg, ms = 3500) {
-  if (ms > 3500) remember("errors", { shown: msg });  // long toasts are the error messages
+function toast(msg, ms = 3500, action = null) {
+  if (ms > 3500 && !action) remember("errors", { shown: msg });  // long toasts are the error messages
   const t = $("#toast");
   t.textContent = msg;
+  if (action) {
+    // e.g. "Undo" right after a tap that may have been a mistake
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "secondary mini", textContent: action.label });
+    b.addEventListener("click", () => { t.hidden = true; action.fn(); });
+    t.append(" ", b);
+  }
   t.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => (t.hidden = true), ms);
@@ -887,6 +893,16 @@ async function useProduct(id, body) {
   renderStock();
 }
 
+async function unopenProduct(id) {
+  try {
+    const r = await api(`/stock/${id}/unopen`, { method: "POST", busy: "Undoing…" });
+    toast(r.message, 5000);
+    stockItems = await api("/stock/all");
+    if (editOpen === id) editData = await api(`/stock/${id}/entries`);
+    renderStock();
+  } catch (err) { toast(err.message, 6000); }
+}
+
 async function saveEntry(entryId, body) {
   const r = await api(`/stock/${editOpen}/entries/${entryId}`, { method: "PUT", json: body, busy: "Saving…" });
   toast(r.message, 5000);
@@ -915,7 +931,9 @@ function renderStock() {
     const when = d == null ? "" : d < 0 ? `${-d} d overdue` : d === 0 ? "due today" : `${d} d left`;
     return `<div class="sitem"><button type="button" class="sname" data-edit="${i.product_id}" aria-expanded="${editOpen === i.product_id}">${esc(i.name)}<span class="pen" aria-hidden="true">✎</span></button><span class="num">${esc(i.amount_text)}</span></div>
       <div class="sline"><span class="small muted">${i.opened_text ? `<span class="badge">opened ${esc(i.opened_text)}</span> ` : ""}${when ? `<span class="${cls}">${when}</span>` : "no due date"}</span>
-      <span class="sbtns"><button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button>
+      <span class="sbtns">${i.all_opened
+        ? `<button type="button" class="secondary mini" data-unopen="${i.product_id}">Not opened?</button>`
+        : `<button type="button" class="secondary mini" data-open="${i.product_id}">Opened</button>`}
       <button type="button" class="mini${useOpen === i.product_id ? "" : " secondary"}" data-use="${i.product_id}">Use</button></span></div>
       ${useOpen === i.product_id ? useHtml(i) : ""}${editOpen === i.product_id ? editHtml() : ""}`;
   }))}</div>`).join("") || `<div class="card muted">${q ? "Nothing in stock matches." : "Nothing in stock yet."}</div>`;
@@ -1056,6 +1074,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (u) { editOpen = null; useOpen = useOpen === Number(u.dataset.use) ? null : Number(u.dataset.use); return renderStock(); }
     const ed = e.target.closest("button[data-edit]");
     if (ed) return openEdit(Number(ed.dataset.edit));
+    const un = e.target.closest("button[data-unopen]");
+    if (un) return unopenProduct(Number(un.dataset.unopen));
     const rm = e.target.closest("button[data-remove]");
     if (rm) {
       if (!confirm("Remove this from stock? (Use it when it isn't at home any more.)")) return;
@@ -1075,8 +1095,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const b = e.target.closest("button[data-open]");
     if (!b) return;
     try {
-      const r = await api(`/stock/${b.dataset.open}/open`, { method: "POST", busy: "Marking as opened…" });
-      toast(r.message, 5000);
+      const id = Number(b.dataset.open);
+      const r = await api(`/stock/${id}/open`, { method: "POST", busy: "Marking as opened…" });
+      toast(r.message, 8000, { label: "Undo", fn: () => unopenProduct(id) });
       stockItems = await api("/stock/all");
       renderStock();
     } catch (err) { toast(err.message, 6000); }
@@ -1090,6 +1111,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const id = Number(f.dataset.id);
     try {
       if (f.classList.contains("eentry")) {
+        const was = editData.entries.find((x) => x.id === Number(f.dataset.entry));
+        // Unticking "Opened" undoes the opening, which also gives back the original best-before date
+        if (was?.opened && !f.opened.checked) return await unopenProduct(editOpen);
         const amount = num(f.amount.value);
         if (!(amount >= 0) || !f.amount.value.trim()) return toast("Type the amount");
         if (amount === 0 && !confirm("Amount 0 removes it from stock. Go on?")) return;

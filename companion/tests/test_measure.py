@@ -88,3 +88,24 @@ async def test_edit_rename_and_remove_from_the_stock_list(settings, catalog, fak
         await rename(svc, 4, RenameIn(name="eggs"))
     assert (await rename(svc, 4, RenameIn(name="Milk 2.5%")))["name"] == "Milk 2.5%"
     assert svc.db.get_kv("original_name:4") == "Pienas"
+
+
+@pytest.mark.asyncio
+async def test_opened_by_mistake_is_undone(settings, catalog, fake_grocy):
+    from app.products import CaptureError
+    from app.stock import open_product, unopen
+
+    fake_grocy.seed("products", {"id": 3, "name": "Sriracha", "qu_id_stock": QU["piece"]})
+    fake_grocy.seed("stock", {"id": 1, "stock_id": "a", "product_id": 3, "amount": 1, "open": 0, "location_id": 3})
+    svc = make_services(settings, catalog, fake_grocy)
+    await open_product(svc, 3)
+    r = await unopen(svc, 3)
+    assert ("undo", "tx-open") in fake_grocy.calls and r["message"] == "Sriracha: marked as not opened"
+    with pytest.raises(CaptureError, match="nothing is marked opened"):
+        await unopen(svc, 3)
+    # opened on the stock-take list, before undo was remembered: the flag is cleared
+    fake_grocy.tables["stock"][1].update({"open": 1, "best_before_date": "2027-04-01", "purchased_date": "2026-10-25"})
+    svc.db.set_kv("open_tx:3", "[]")
+    await unopen(svc, 3)
+    body = next(c for c in fake_grocy.calls if c[0] == "edit_entry")[2]
+    assert body["open"] == 0 and body["best_before_date"] == "2027-04-01"

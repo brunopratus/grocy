@@ -97,6 +97,7 @@ async def test_inventory_lists_stock(settings, catalog, fake_grocy):
             "container_g": None,
             "amount_text": "2 pieces",
             "opened_text": None,
+            "all_opened": False,
             "location": "Fridge",
             "due": None,
             "days_left": None,

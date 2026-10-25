@@ -28,6 +28,7 @@ from .claude import compact_json, image_block, pdf_block
 from .deps import Services
 from .names import originals
 from .products import StockAddIn, add_stock, net_of, set_pack_size, summary
+from .stock import remember_open
 from .units import UnitError, convert, dimension, fmt_amount, normalize_unit
 
 log = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ async def _open_added(svc: Services, line: CommitLine, res: dict[str, Any]) -> s
         with contextlib.suppress(UnitError):
             amount = convert(1, line.unit, stock_unit, net_amount_per_pack=net, net_unit=net_unit)
     amount = min(amount, added)
-    await svc.grocy.open_stock(line.product_id, round(amount, 4))
+    remember_open(svc, line.product_id, await svc.grocy.open_stock(line.product_id, round(amount, 4)))
     svc.db.add_event(
         "opened",
         f"Opened {fmt_amount(amount, stock_unit)} {product['name']} (stock-take)",

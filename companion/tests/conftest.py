@@ -145,6 +145,12 @@ class FakeGrocy(GrocyClient):
         self.product_stock[product_id] = self.product_stock.get(product_id, 0) + amount
         return [{"transaction_id": "tx-add"}]
 
+    async def undo_transaction(self, transaction_id: str) -> Any:
+        self.calls.append(("undo", transaction_id))
+        for e in self.tables.get("stock", {}).values():
+            e["open"] = 0
+        return None
+
     async def edit_stock_entry(self, entry_id: int, body: dict[str, Any]) -> Any:
         self.calls.append(("edit_entry", entry_id, body))
         return [{"transaction_id": "tx-edit"}]

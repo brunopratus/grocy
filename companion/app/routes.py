@@ -232,6 +232,11 @@ async def rename_product(product_id: int, body: stock.RenameIn, request: Request
     return await stock.rename(svc_of(request), product_id, body)
 
 
+@router.post("/stock/{product_id}/unopen")
+async def unopen_product(product_id: int, request: Request) -> dict[str, Any]:
+    return await stock.unopen(svc_of(request), product_id)
+
+
 @router.get("/stock/open-due")
 async def open_due(request: Request, days: int | None = Query(None, ge=0, le=60)) -> list[dict[str, Any]]:
     return await alerts.open_and_due(svc_of(request), days)

@@ -317,3 +317,4 @@ button.sname:focus-visible { outline: 2px solid var(--accent); outline-offset: 3
 .edit .rbb { display: flex; align-items: center; gap: .5rem; margin: .6rem 0 0; font-size: .85rem; color: var(--muted); }
 .edit label.check { margin: .6rem 0 .2rem; }
 .edit .row button { margin-bottom: 0; }
+button.mini { white-space: nowrap; }

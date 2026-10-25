@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import date
@@ -403,6 +404,7 @@ async def inventory(svc: Services) -> list[dict[str, Any]]:
                 "container_g": float(c) if (c := svc.db.get_kv(f"container_g:{int(s['product_id'])}")) else None,
                 "amount_text": fmt_amount(amount, unit),
                 "opened_text": fmt_amount(opened, unit) if opened else None,
+                "all_opened": opened >= amount - EPS,
                 "location": svc.catalog.location_name(product.get("location_id")),
                 "due": due if days_left is not None else None,
                 "days_left": days_left,
@@ -410,6 +412,56 @@ async def inventory(svc: Services) -> list[dict[str, Any]]:
             }
         )
     return sorted(items, key=lambda i: i["name"].lower())
+
+
+def _tx(res: Any) -> str | None:
+    return res[0].get("transaction_id") if isinstance(res, list) and res and isinstance(res[0], dict) else None
+
+
+def remember_open(svc: Services, product_id: int, res: Any) -> None:
+    """Keep the opening's Grocy transaction, so a tap on 'Opened' by mistake can be undone exactly."""
+    if tx := _tx(res):
+        key = f"open_tx:{product_id}"
+        stack = json.loads(svc.db.get_kv(key) or "[]")[-9:]
+        svc.db.set_kv(key, json.dumps([*stack, tx]))
+
+
+async def unopen(svc: Services, product_id: int) -> dict[str, Any]:
+    """Undo the last 'Opened': the pack is unopened again and gets its original best-before date back."""
+    product = await svc.grocy.object("products", product_id)
+    key = f"open_tx:{product_id}"
+    stack = json.loads(svc.db.get_kv(key) or "[]")
+    opened = [e for e in await svc.grocy.stock_entries(product_id) if int(e.get("open") or 0)]
+    if not opened:
+        svc.db.set_kv(key, "[]")
+        raise CaptureError(f"{product['name']}: nothing is marked opened")
+    while stack:
+        tx = stack.pop()
+        svc.db.set_kv(key, json.dumps(stack))
+        try:
+            await svc.grocy.undo_transaction(tx)
+            break
+        except GrocyError as e:  # already undone, or the pack was used since: try the one before
+            log.info("undo of opening %s failed: %s", tx, e)
+    else:
+        # Opened elsewhere (e.g. ticked on the stock-take list): just clear the flag
+        e = max(opened, key=lambda e: e.get("opened_date") or "")
+        await svc.grocy.edit_stock_entry(
+            int(e["id"]),
+            {
+                "amount": float(e["amount"]),
+                "best_before_date": e.get("best_before_date"),
+                "location_id": e.get("location_id"),
+                "shopping_location_id": e.get("shopping_location_id"),
+                "price": e.get("price"),
+                "open": 0,
+                "purchased_date": e.get("purchased_date"),
+                "note": e.get("note"),
+            },
+        )
+    message = f"{product['name']}: marked as not opened"
+    svc.db.add_event("unopened", message, product_id=product_id, product_name=product["name"])
+    return {"message": message}
 
 
 async def open_product(svc: Services, product_id: int) -> dict[str, Any]:
@@ -433,7 +485,8 @@ async def open_product(svc: Services, product_id: int) -> dict[str, Any]:
     else:
         amount = available  # pack size unknown: the whole stock entry is one pack
     amount = min(amount, available)
-    await svc.grocy.open_stock(product_id, amount, entry["stock_id"])
+    res = await svc.grocy.open_stock(product_id, amount, entry["stock_id"])
+    remember_open(svc, product_id, res)
     after = [e for e in await svc.grocy.stock_entries(product_id) if int(e.get("open") or 0)]
     due = min((e.get("best_before_date") or "" for e in after), default="") or None
     message = f"Opened {fmt_amount(amount, unit)} {product['name']}, {_due_text(due)}"
