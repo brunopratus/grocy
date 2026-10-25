@@ -64,6 +64,7 @@ function show(id) {
   if (id !== "bug") lastScreen = id;
   remember("actions", { screen: id });
   const changed = currentPanel !== id;
+  const from = currentPanel;
   currentPanel = id;
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   if (changed) window.scrollTo(0, 0);  // a new screen starts at the top, not where the last one was scrolled
@@ -71,7 +72,9 @@ function show(id) {
     : esc(id === "receipt" && lastReceipt ? MODE_TITLES[lastReceipt.mode || "receipt"] : TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
   $("#bug-btn").hidden = !lookups.testing || id === "login" || id === "bug";  // test phase only
-  if (!["scan", "label"].includes(id)) receiptCtx = null;  // back on the receipt (or elsewhere): line context done
+  // Back on the receipt (or elsewhere): line context done. A bug report in between keeps it.
+  if (!["scan", "label", "bug"].includes(id)) receiptCtx = null;
+  if (id === "scan" && changed && from !== "bug") clearScan();
   const forLine = receiptCtx != null && (id === "scan" || id === "label")
     ? (receiptCtx === -1 ? { text: "New item for the list" } : lastReceipt?.lines[receiptCtx]) : null;
   $("#ctx").hidden = !forLine;
@@ -176,6 +179,7 @@ let scanControls = null;
 async function startScan() {
   if (!window.ZXingBrowser) return toast("Scanner library not loaded yet");
   stopScan();
+  clearScan();
   const reader = new ZXingBrowser.BrowserMultiFormatReader();
   try {
     scanControls = await reader.decodeFromConstraints(
@@ -202,6 +206,12 @@ function validBarcode(code) {
   const check = digits.pop();
   const sum = digits.reverse().reduce((a, d, i) => a + d * (i % 2 === 0 ? 3 : 1), 0);
   return (10 - (sum % 10)) % 10 === check;
+}
+// A new scan starts clean: no code, product card or "Add to stock" form left from the last one
+function clearScan() {
+  $("#manual-code [name=code]").value = "";
+  $("#scan-result").innerHTML = "";
+  $("#add-stock").hidden = true;
 }
 function stopScan() { lastRead = null; if (scanControls) { scanControls.stop(); scanControls = null; } }
 
@@ -234,7 +244,9 @@ async function lookupCode(code) {
   form.hidden = !p;
   if (p) {
     form.product_id.value = p.id;
-    form.unit.value = p.net_amount_per_pack ? "pack" : p.stock_unit;
+    const unit = p.net_amount_per_pack ? "pack" : p.stock_unit;
+    if (![...form.unit.options].some((o) => o.value === unit)) form.unit.add(new Option(unit));  // own Grocy unit ("Bottle")
+    form.unit.value = unit;
   }
 }
 
@@ -410,13 +422,19 @@ function headerHtml(r) {
     <p class="small muted">Total ${eur(r.total_eur)} · lines ${eur(sum)}</p>`;
 }
 
+// iPhone shows an empty date box as today's date: cover it with "not set" until a date is chosen
+function dateField(attrs, value) {
+  return `<span class="datef${value ? " has" : ""}"><input type="date" ${attrs} value="${value || ""}"><span class="dph">not set</span></span>`;
+}
+function syncDate(input) { input.closest(".datef")?.classList.toggle("has", !!input.value); }
+
 function extrasHtml(l, i, mode) {
   if (mode === "receipt" && !l.added_by_hand) return "";
   const loc = mode === "home" ? `<select class="rloc" data-i="${i}" aria-label="Where">${LOCATIONS.map((x) => `<option${x === (l.location || l.product?.location) ? " selected" : ""}>${x}</option>`).join("")}</select>` : "";
   const price = mode !== "home" ? `<label class="rbb">Price €<input class="rprice" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${l.line_total_eur ?? ""}"></label>` : "";
   return `<div class="rextra">
       <label class="check"><input type="checkbox" class="ropen" data-i="${i}"${l.opened ? " checked" : ""}> Already opened</label>
-      <label class="rbb">Best before<input class="rbbd" data-i="${i}" type="date" value="${l.best_before || ""}"></label>
+      <label class="rbb">Best before${dateField(`class="rbbd" data-i="${i}"`, l.best_before)}</label>
       ${loc}${price}</div>`;
 }
 
@@ -940,21 +958,28 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   on("#scan-start", "click", startScan);
   on("#scan-stop", "click", stopScan);
-  on("#manual-code", "submit", (e) => lookupCode(e.target.code.value.trim()));
+  on("#manual-code", "submit", (e) => {
+    const code = e.target.code.value.trim();
+    if (!code) return toast("Type the numbers under the barcode, or tap Start camera");
+    return lookupCode(code);
+  });
   on("#add-stock", "submit", async (e) => {
     const body = formJson(e.target, ["product_id", "amount", "price_total"]);
     const r = await api("/stock/add", { method: "POST", json: body, busy: "Adding…" });
     toast(r.message);
     e.target.reset();
+    syncDate(e.target.best_before);
     e.target.hidden = true;
   });
+  document.addEventListener("input", (e) => { if (e.target.type === "date") syncDate(e.target); });
+  document.addEventListener("change", (e) => { if (e.target.type === "date") syncDate(e.target); });
   on("#due-photo", "change", async (e) => {
     const f = e.target.files[0];
     if (!f) return;
     const fd = new FormData();
     fd.append("image", f);
     const r = await api("/ocr/due-date", { method: "POST", form: fd, busy: "Reading date…" });
-    if (r.date) { $("#add-stock [name=best_before]").value = r.date; toast(`Date: ${r.date} (${r.confidence})`); } else toast("Could not read a date");
+    if (r.date) { $("#add-stock [name=best_before]").value = r.date; syncDate($("#add-stock [name=best_before]")); toast(`Date: ${r.date} (${r.confidence})`); } else toast("Could not read a date");
     e.target.value = "";
   });
 

@@ -86,8 +86,9 @@
         <label>Price € (total)<input name="price_total" type="text" inputmode="decimal" pattern="\d+([.,]\d+)?" autocomplete="off"></label>
         <label>Store<select name="store" class="stores"></select></label>
       </div>
-      <label>Best before<input name="best_before" type="date"></label>
-      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Read date from photo<input id="due-photo" type="file" accept="image/*" capture="environment"></label>
+      <label>Best before <span class="small muted">(optional: empty uses the product's usual shelf life)</span>
+        <span class="datef"><input name="best_before" type="date"><span class="dph">not set</span></span></label>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Or take a photo of the date printed on the pack: it's read for you<input id="due-photo" type="file" accept="image/*" capture="environment"></label>
       <button type="submit">Add</button>
     </form>
   </section>
