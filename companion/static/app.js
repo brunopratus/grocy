@@ -67,18 +67,20 @@ function show(id) {
   currentPanel = id;
   $$(".panel").forEach((p) => (p.hidden = p.id !== id));
   if (changed) window.scrollTo(0, 0);  // a new screen starts at the top, not where the last one was scrolled
-  $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>' : esc(TITLES[id]);
+  $("#title").innerHTML = id === "home" || id === "login" ? 'Grocy<span class="plus">+</span>'
+    : esc(id === "receipt" && lastReceipt ? MODE_TITLES[lastReceipt.mode || "receipt"] : TITLES[id]);
   $("#back").hidden = id === "home" || id === "login";
   $("#bug-btn").hidden = !lookups.testing || id === "login" || id === "bug";  // test phase only
   if (!["scan", "label"].includes(id)) receiptCtx = null;  // back on the receipt (or elsewhere): line context done
-  const forLine = receiptCtx != null && (id === "scan" || id === "label") ? lastReceipt?.lines[receiptCtx] : null;
+  const forLine = receiptCtx != null && (id === "scan" || id === "label")
+    ? (receiptCtx === -1 ? { text: "New item for the list" } : lastReceipt?.lines[receiptCtx]) : null;
   $("#ctx").hidden = !forLine;
   if (forLine) $("#ctx-text").textContent = forLine.text;
   if (id !== "scan") stopScan();
   if (id === "scan" && receiptCtx != null) startScan().catch(() => {});
   if (id === "due") loadDue();
   if (id === "events") loadEvents();
-  if (id === "home") { loadHomeDue(); loadCreditWarning(); }
+  if (id === "home") { loadHomeDue(); loadCreditWarning(); loadFirstStep(); }
   if (id === "receipt") openFinishShopping();
   if (id === "stock") loadStock();
   if (id === "usage") loadUsage();
@@ -144,6 +146,24 @@ async function loadHomeDue() {
     const items = await api("/stock/open-due");
     $("#home-due").innerHTML = items.length ? `<h2>Use these first</h2>${list(items.slice(0, 6).map(dueItem))}` : "";
   } catch { /* not logged in yet */ }
+}
+
+// One-time first step: put what's already at home into Grocy (shown until done or skipped)
+function loadFirstStep() {
+  const card = $("#first-step");
+  card.hidden = lookups.home_stock_done !== false;
+  if (card.hidden) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ }
+  const going = (lastReceipt || saved)?.mode === "home";
+  $("#first-step-go").textContent = going ? "Continue the stock-take" : "Start";
+}
+
+async function startHomeStock() {
+  if (!lastReceipt) { try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ } }
+  if (lastReceipt?.mode === "home") return show("receipt");
+  if (lastReceipt?.lines.some((l) => l.include && !l.done) && !confirm("A shopping checklist is still open. Replace it with the stock-take?")) return;
+  startList("home");
 }
 
 async function loadEvents() {
@@ -245,18 +265,24 @@ function initLine(l) {
 
 function lineState(l) {
   if (!l.product) return { ok: false, why: "missing" };
+  if (!(l.quantity > 0)) return { ok: false, why: "qty" };
   if (l.shelf === "asking" || l.shelf === "question") return { ok: false, why: "shelf" };
   if (needsPack(l) && !l.pack_size) return { ok: false, why: "pack" };
   return { ok: true, why: hasNutrition(l.product) ? "" : "nutrition" };
 }
 
 function amountHtml(l, i) {
-  if (!COUNT_UNITS.includes(l.unit)) return `<div class="ramount">Amount <strong>${l.quantity} ${esc(l.unit)}</strong> (weighed)</div>`;
-  const total = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
-  const units = ["g", "ml"].map((u) => `<option${u === l.pack_unit ? " selected" : ""}>${u}</option>`).join("");
-  return `<div class="ramount">${l.quantity} ${esc(l.unit)} ×
+  const units = (UNITS.includes(l.unit) ? UNITS : [l.unit, ...UNITS]).map((u) => `<option${u === l.unit ? " selected" : ""}>${u}</option>`).join("");
+  let pack = "";
+  if (COUNT_UNITS.includes(l.unit)) {
+    const total = l.pack_size && l.quantity ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
+    const pu = ["g", "ml"].map((u) => `<option${u === l.pack_unit ? " selected" : ""}>${u}</option>`).join("");
+    pack = ` ×
     <input class="rpack" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
-    <select class="rpunit" data-i="${i}">${units}</select> <span class="rtotal">${total}</span></div>`;
+    <select class="rpunit" data-i="${i}">${pu}</select> <span class="rtotal">${total}</span>`;
+  }
+  return `<div class="ramount"><input class="rqty" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="how much" value="${l.quantity ?? ""}">
+    <select class="runit" data-i="${i}">${units}</select>${pack}</div>`;
 }
 
 function chip(ok, text, warn) {
@@ -330,19 +356,71 @@ function updateReceiptLine(i) {
   const rq = li.querySelector(".rq");
   if (rq) rq.innerHTML = shelfQuestionHtml(l, i);
   const rtotal = li.querySelector(".rtotal");
-  if (rtotal) rtotal.innerHTML = l.pack_size ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
+  if (rtotal) rtotal.innerHTML = l.pack_size && l.quantity ? `= <strong>${+(l.quantity * l.pack_size).toFixed(1)} ${esc(l.pack_unit)}</strong>` : "";
   const hint = li.querySelector(".rhint");
-  if (hint) hint.hidden = Boolean(l.pack_size) || !needsPack(l);
+  if (hint) { hint.textContent = hintText(l); hint.hidden = lineState(l).ok; }
   const sum = summaryHtml(lastReceipt);
   $("#receipt-result .rsum").innerHTML = sum.html;
   const btn = $("#receipt-commit");
-  btn.disabled = !sum.ready;
-  btn.textContent = `Add ${sum.ready} ready line${sum.ready === 1 ? "" : "s"} to stock`;
+  if (btn) { btn.disabled = !sum.ready; btn.textContent = commitText(sum.ready); }
   saveReceipt();
+}
+
+const UNITS = ["piece", "pack", "g", "kg", "ml", "l"];
+const LOCATIONS = ["Fridge", "Freezer", "Pantry"];
+const MODE_TITLES = { receipt: "Finish shopping", manual: "Finish shopping", home: "Stock at home" };
+
+// A list without a receipt: "manual" (receipt won't read / no receipt) or "home" (one-time stock-take)
+function startList(mode) {
+  lastReceipt = { mode, store: null, date: new Date().toLocaleDateString("sv-SE"), total_eur: null, lines: [], location: "Fridge" };
+  renderReceipt();
+  show("receipt");
+}
+
+function newLine(product, name) {
+  const r = lastReceipt;
+  const unit = !product ? "piece"
+    : product.net_amount_per_pack && MASS_VOL.includes(product.stock_unit) ? "pack"
+    : product.stock_unit || "piece";
+  return {
+    text: product?.name || name, name_en: "", quantity: MASS_VOL.includes(unit) ? null : 1, unit,
+    line_total_eur: null, is_food: true, include: true, added_by_hand: true,
+    product_id: product?.id ?? null, product: product || null,
+    location: r.mode === "home" ? r.location : null,
+  };
+}
+
+function headerHtml(r) {
+  if (r.mode === "home") {
+    const seg = LOCATIONS.map((x) => `<button type="button" class="${x === r.location ? "" : "secondary"}" data-act="loc" data-loc="${x}">${x}</button>`).join("");
+    return `<h2>What's at home</h2>
+      <p class="small muted">Scan or name what you have, one place at a time. No prices needed; tick what's already open.</p>
+      <div class="seg"><span class="small muted">Putting away in</span>${seg}</div>`;
+  }
+  if (r.mode === "manual") {
+    const stores = `<option value="">Store…</option>` + lookups.stores.map((x) => `<option value="${esc(x)}"${x === (r.store || "").toLowerCase() ? " selected" : ""}>${esc(x[0].toUpperCase() + x.slice(1))}</option>`).join("");
+    return `<h2>Without a receipt</h2>
+      <p class="small muted">Scan or name each item. Prices are optional.</p>
+      <select class="rstore" aria-label="Store">${stores}</select>`;
+  }
+  const sum = r.lines.reduce((a, l) => a + (l.line_total_eur || 0), 0);
+  return `<h2>${esc(r.store || "Receipt")} ${r.date ? `<span class="badge">${esc(r.date)}</span>` : ""}</h2>
+    <p class="small muted">Total ${eur(r.total_eur)} · lines ${eur(sum)}</p>`;
+}
+
+function extrasHtml(l, i, mode) {
+  if (mode === "receipt" && !l.added_by_hand) return "";
+  const loc = mode === "home" ? `<select class="rloc" data-i="${i}" aria-label="Where">${LOCATIONS.map((x) => `<option${x === (l.location || l.product?.location) ? " selected" : ""}>${x}</option>`).join("")}</select>` : "";
+  const price = mode !== "home" ? `<label class="rbb">Price €<input class="rprice" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${l.line_total_eur ?? ""}"></label>` : "";
+  return `<div class="rextra">
+      <label class="check"><input type="checkbox" class="ropen" data-i="${i}"${l.opened ? " checked" : ""}> Already opened</label>
+      <label class="rbb">Best before<input class="rbbd" data-i="${i}" type="date" value="${l.best_before || ""}"></label>
+      ${loc}${price}</div>`;
 }
 
 function renderReceipt() {
   const r = lastReceipt;
+  r.mode = r.mode || "receipt";
   r.lines.forEach(initLine);
   const opts = (sel) => `<option value="">${sel ? "Not this product" : "Already in Grocy under another name? Pick it"}</option>` + lookups.products
     .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
@@ -354,46 +432,75 @@ function renderReceipt() {
           <button type="button" class="secondary" data-act="sugg-no" data-i="${i}">No</button></div>` : "";
     const actions = [
       !l.product ? `<button type="button" class="secondary" data-act="scan" data-i="${i}">Scan barcode</button>` : "",
+      !l.product && l.added_by_hand && (!l.suggestion || l.suggestion_no) ? `<button type="button" class="secondary" data-act="create" data-i="${i}">Create "${esc(l.text)}"</button>` : "",
       l.product && !hasNutrition(l.product) ? `<button type="button" class="secondary" data-act="label" data-i="${i}">Photo of label</button>` : "",
     ].join("");
+    const price = r.mode === "receipt" && !l.added_by_hand ? `<span class="num">${eur(l.line_total_eur)}</span>` : "";
     return `<li class="rline${l.is_food ? "" : " nonfood"}${l.include ? "" : " off"}" data-i="${i}">
       <div class="rtop"><label class="check"><input type="checkbox" class="rinc" data-i="${i}"${l.include ? " checked" : ""}>
-        <strong>${esc(l.text)}</strong></label><span class="num">${eur(l.line_total_eur)}</span></div>
-      <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
+        <strong>${esc(l.text)}</strong></label>${price}</div>
+      <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product && l.product.name !== l.text ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
       ${l.include ? `<div class="chips">${chipsHtml(l)}</div><div class="rq">${shelfQuestionHtml(l, i)}</div>
-      ${l.product ? amountHtml(l, i) : ""}
+      ${l.product ? amountHtml(l, i) + extrasHtml(l, i, r.mode) : ""}
       ${suggest}${actions ? `<div class="ractions">${actions}</div>` : ""}
       <select class="rprod" data-i="${i}" aria-label="Grocy product">${opts(l.product_id)}</select>` : ""}
-      ${l.include && needsPack(l) ? `<div class="small warn rhint"${st.why === "pack" ? "" : " hidden"}>How much is one pack? (e.g. 500 g of butter)</div>` : ""}</li>`;
+      ${l.include && l.product ? `<div class="small warn rhint"${st.ok ? " hidden" : ""}>${hintText(l)}</div>` : ""}</li>`;
   }).join("");
   const { ready, html: sumHtml } = summaryHtml(r);
-  const sum = r.lines.reduce((a, l) => a + (l.line_total_eur || 0), 0);
+  const addTitle = r.mode === "receipt" ? "Missing a line? Add it" : "Add an item";
   $("#receipt-result").innerHTML = `<div class="card">
-    <h2>${esc(r.store || "Receipt")} ${r.date ? `<span class="badge">${esc(r.date)}</span>` : ""}</h2>
-    <p class="small muted">Total ${eur(r.total_eur)} · lines ${eur(sum)}</p>
-    <div class="rsum">${sumHtml}</div>
+    ${headerHtml(r)}
+    ${r.lines.length ? `<div class="rsum">${sumHtml}</div>` : ""}
     <ul class="list">${rows}</ul>
-    <button id="receipt-commit" type="button"${ready ? "" : " disabled"}>Add ${ready} ready line${ready === 1 ? "" : "s"} to stock</button>
-    <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p>
-    <button id="receipt-discard" type="button" class="secondary danger">Discard this receipt</button></div>`;
+    <div class="radd"><h3>${addTitle}</h3>
+      <button type="button" data-act="add-scan">Scan barcode</button>
+      <form class="rname row"><input name="name" placeholder="…or type a name, e.g. grikiai" autocomplete="off"><button type="submit" class="secondary">Add</button></form>
+    </div>
+    ${r.lines.length ? `<button id="receipt-commit" type="button"${ready ? "" : " disabled"}>${commitText(ready)}</button>
+      <p class="small muted">Lines that aren't ready stay here: finish them, then add again.</p>` : ""}
+    ${r.mode === "home" ? `<button type="button" class="secondary" data-act="home-done">I'm done with the first step</button>` : ""}
+    <button id="receipt-discard" type="button" class="secondary danger">Discard this list</button></div>`;
   saveReceipt();
   ensureShelfLife();
+}
+
+function commitText(ready) {
+  const word = lastReceipt.mode === "receipt" ? "ready line" : "item";
+  return `Add ${ready} ${word}${ready === 1 ? "" : "s"} to stock`;
+}
+
+function hintText(l) {
+  const st = lineState(l);
+  if (st.why === "qty") return "How much? Type the amount.";
+  if (st.why === "pack") return "How much is one pack? (e.g. 500 g of butter)";
+  return "";
 }
 
 // The checklist survives closing the app (iPhone may also reload the page after using the camera)
 function saveReceipt() {
   try {
-    if (lastReceipt?.lines.length) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
+    if (lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
     else localStorage.removeItem("gp-receipt");
   } catch { /* storage blocked: the checklist just isn't kept */ }
+  syncReceiptForm();
+}
+
+// The receipt photo form only belongs to "Finish shopping" with a receipt (or nothing started yet)
+function syncReceiptForm() {
+  const noReceipt = lastReceipt && lastReceipt.mode && lastReceipt.mode !== "receipt";
+  $("#receipt-form").hidden = !!noReceipt;
+  $("#receipt-inbox").hidden = !!noReceipt;
+  $("#manual-start").hidden = !!lastReceipt;
 }
 
 async function openFinishShopping() {
   if (!lastReceipt) {
     try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { lastReceipt = null; }
     lastReceipt?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
-    if (lastReceipt?.lines.length) renderReceipt();
+    if (lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) renderReceipt();
   }
+  syncReceiptForm();
+  if (lastReceipt?.mode === "home") return;
   try {
     const r = await api("/receipts/inbox");
     $("#receipt-inbox").innerHTML = `<h2>Receipts waiting</h2>` + (r.receipts.length
@@ -404,43 +511,83 @@ async function openFinishShopping() {
 }
 
 async function assignToLine(card) {
-  const l = lastReceipt.lines[receiptCtx];
+  let l = lastReceipt.lines[receiptCtx];
+  if (receiptCtx === -1) { l = newLine(card); lastReceipt.lines.push(l); }  // "Add an item" by scanning
   receiptCtx = null;
   Object.assign(l, { product_id: card.id, product: card, include: true, pack_size: null, shelf: null });
   await refreshLookups();
   renderReceipt();
   show("receipt");
   $(`#receipt-result .rline[data-i="${lastReceipt.lines.indexOf(l)}"]`)?.scrollIntoView({ block: "center" });
-  toast(`${card.name} linked to the receipt`);
+  toast(`${card.name} added to the list`);
+}
+
+async function addByName(name) {
+  const r = await api("/products/by-name", { method: "POST", json: { name }, busy: "Looking it up…" });
+  const l = newLine(r.product, name);
+  if (r.status === "suggestion") Object.assign(l, { suggestion: r.suggestion });
+  if (r.status === "created") await refreshLookups();
+  lastReceipt.lines.push(l);
+  renderReceipt();
+  $(`#receipt-result .rline[data-i="${lastReceipt.lines.length - 1}"]`)?.scrollIntoView({ block: "center" });
+  $("#receipt-result .rname [name=name]").value = "";
+}
+
+async function finishHomeStock() {
+  const open = lastReceipt.lines.filter((l) => l.include && !l.done).length;
+  if (open && !confirm(`${open} item(s) on the list aren't added yet. Finish anyway?`)) return;
+  await api("/setup/home-stock", { method: "POST", json: { done: true } });
+  lookups.home_stock_done = true;
+  lastReceipt = null;
+  saveReceipt();
+  $("#receipt-result").innerHTML = "";
+  toast("First step done: your stock is in Grocy", 5000);
+  show("home");
 }
 
 async function commitReceipt() {
   const todo = lastReceipt.lines.filter((l) => l.include && lineState(l).ok && !l.done);
   if (!todo.length) return toast("Nothing ready to add");
   const lines = todo.map((l) => ({
-    product_id: l.product_id, quantity: l.quantity, unit: l.unit, line_total_eur: l.line_total_eur,
+    product_id: l.product_id, quantity: l.quantity, unit: l.unit, line_total_eur: l.line_total_eur ?? null,
     ...(COUNT_UNITS.includes(l.unit) && l.pack_size ? { pack_size: l.pack_size, pack_unit: l.pack_unit } : {}),
+    ...(l.opened ? { opened: true } : {}),
+    ...(l.best_before ? { best_before: l.best_before } : {}),
+    ...(l.location ? { location: l.location } : {}),
   }));
-  const r = await api("/receipts/commit", { method: "POST", json: { store: lastReceipt.store, lines }, busy: "Adding to stock…" });
+  const store = lastReceipt.mode === "home" ? null : lastReceipt.store;
+  const r = await api("/receipts/commit", { method: "POST", json: { store, lines }, busy: "Adding to stock…" });
   r.lines.forEach((res, k) => { if (res.added) todo[k].done = true; });
   const left = lastReceipt.lines.filter((l) => l.include && !l.done);
   lastReceipt.lines = left;
   const doneHtml = `<div class="card"><h2>${r.added} line(s) added to stock</h2>
     ${list(r.lines.map((l) => l.added ? esc(l.added) : `<span class="bad">${esc(l.error)}</span>`))}</div>`;
-  if (left.length) { renderReceipt(); $("#receipt-result").insertAdjacentHTML("afterbegin", doneHtml); }
-  else { $("#receipt-result").innerHTML = doneHtml; saveReceipt(); }
+  if (left.length || lastReceipt.mode === "home") {
+    // The home stock-take continues (next shelf) until "I'm done"
+    renderReceipt();
+    $("#receipt-result").insertAdjacentHTML("afterbegin", doneHtml);
+  } else { $("#receipt-result").innerHTML = doneHtml; saveReceipt(); }
 }
 
 function wireReceipt() {
   const box = $("#receipt-result");
   box.addEventListener("change", async (e) => {
+    if (e.target.classList.contains("rstore")) { lastReceipt.store = e.target.value || null; return saveReceipt(); }
     const i = Number(e.target.dataset.i);
     const l = lastReceipt?.lines[i];
     if (!l) return;
+    if (e.target.classList.contains("ropen")) { l.opened = e.target.checked; return saveReceipt(); }
+    if (e.target.classList.contains("rbbd")) { l.best_before = e.target.value || null; return saveReceipt(); }
+    if (e.target.classList.contains("rloc")) { l.location = e.target.value; return saveReceipt(); }
+    if (["rqty", "rprice"].some((c) => e.target.classList.contains(c))) return;  // handled on "input"
     try {
       if (e.target.classList.contains("rinc")) l.include = e.target.checked;
       if (e.target.classList.contains("rpack")) return;  // handled on "input"
       if (e.target.classList.contains("rpunit")) { l.pack_unit = e.target.value; return updateReceiptLine(i); }
+      if (e.target.classList.contains("runit")) {
+        l.unit = e.target.value;
+        if (!COUNT_UNITS.includes(l.unit)) l.pack_size = null;
+      }
       if (e.target.classList.contains("rprod")) {
         const id = Number(e.target.value);
         Object.assign(l, id ? { product_id: id, product: await api(`/products/${id}/card`), pack_size: null, shelf: null } : { product_id: null, product: null, include: false });
@@ -449,10 +596,21 @@ function wireReceipt() {
     } catch (err) { toast(err.message, 6000); }
   });
   box.addEventListener("input", (e) => {
-    if (!e.target.classList.contains("rpack")) return;
     const i = Number(e.target.dataset.i);
-    lastReceipt.lines[i].pack_size = num(e.target.value) || null;
+    const l = lastReceipt?.lines[i];
+    if (!l) return;
+    if (e.target.classList.contains("rpack")) l.pack_size = num(e.target.value) || null;
+    else if (e.target.classList.contains("rqty")) l.quantity = num(e.target.value) || null;
+    else if (e.target.classList.contains("rprice")) { l.line_total_eur = e.target.value.trim() ? num(e.target.value) : null; return saveReceipt(); }
+    else return;
     updateReceiptLine(i);
+  });
+  box.addEventListener("submit", async (e) => {
+    if (!e.target.classList.contains("rname")) return;
+    e.preventDefault();
+    const name = e.target.name.value.trim();
+    if (!name) return;
+    try { await addByName(name); } catch (err) { toast(err.message, 6000); }
   });
   box.addEventListener("click", async (e) => {
     const b = e.target.closest("button");
@@ -460,14 +618,27 @@ function wireReceipt() {
     try {
       if (b.id === "receipt-commit") return await commitReceipt();
       if (b.id === "receipt-discard") {
-        if (!confirm("Discard this receipt? Nothing more is added to stock.")) return;
+        if (!confirm("Discard this list? Nothing more is added to stock.")) return;
         lastReceipt = null;
         saveReceipt();
         try { localStorage.removeItem("gp-receipt"); } catch { /* ignore */ }
         $("#receipt-result").innerHTML = "";
-        return toast("Receipt discarded");
+        syncReceiptForm();
+        show(currentPanel);  // title back to "Finish shopping"
+        return toast("List discarded");
       }
       if (b.dataset.act === "shelf") return await askShelfLife(Number(b.dataset.i), b.dataset.a);
+      if (b.dataset.act === "manual") return startList("manual");
+      if (b.dataset.act === "loc") { lastReceipt.location = b.dataset.loc; return renderReceipt(); }
+      if (b.dataset.act === "add-scan") { receiptCtx = -1; return show("scan"); }
+      if (b.dataset.act === "home-done") return await finishHomeStock();
+      if (b.dataset.act === "create") {
+        const l = lastReceipt.lines[Number(b.dataset.i)];
+        const r = await api("/products/by-name", { method: "POST", json: { name: l.text, create: true }, busy: "Creating with Claude…" });
+        Object.assign(l, newLine(r.product), { text: l.text });
+        await refreshLookups();
+        return renderReceipt();
+      }
       if (b.dataset.act === "sugg-yes" || b.dataset.act === "sugg-no") {
         const l = lastReceipt.lines[Number(b.dataset.i)];
         if (b.dataset.act === "sugg-yes") Object.assign(l, { product_id: l.suggestion.id, product: l.suggestion, include: true, shelf: null });
@@ -731,12 +902,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     refreshLookups();
   });
 
+  on("#manual-start", "click", () => startList("manual"));
+  on("#first-step-go", "click", () => startHomeStock().catch((err) => toast(err.message, 6000)));
+  on("#first-step-skip", "click", async (e) => {
+    e.preventDefault();
+    if (!confirm("Skip the first step? Grocy then only knows what you add from now on.")) return;
+    await api("/setup/home-stock", { method: "POST", json: { done: true } });
+    lookups.home_stock_done = true;
+    loadFirstStep();
+  });
   on("#receipt-form", "submit", async (e) => {
     const fd = new FormData();
     fd.append("image", e.target.image.files[0]);
     fd.append("commit", "false");
-    const r = await api("/receipts/photo", { method: "POST", form: fd, busy: "Reading receipt… (up to a minute)" });
-    lastReceipt = r;
+    let r;
+    try {
+      r = await api("/receipts/photo", { method: "POST", form: fd, busy: "Reading receipt… (up to a minute)" });
+    } catch (err) {
+      e.target.reset();
+      $("#receipt-result").innerHTML = `<div class="card warn-card"><p><b>Couldn't read this receipt</b><br>${esc(err.message)}</p>
+        <p>Try a sharper, flatter photo, or enter the items yourself.</p>
+        <button data-act="manual">Enter the items manually</button></div>`;
+      return;
+    }
+    if (!r.lines?.length) r.lines = [];
+    lastReceipt = { mode: "receipt", ...r };
     renderReceipt();
     e.target.reset();
   });

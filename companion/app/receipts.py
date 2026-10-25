@@ -13,6 +13,7 @@ TODO (phase 4, later):
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import logging
 import re
@@ -25,8 +26,8 @@ from pydantic import BaseModel, Field
 
 from .claude import compact_json, image_block, pdf_block
 from .deps import Services
-from .products import StockAddIn, add_stock, set_pack_size, summary
-from .units import UnitError, normalize_unit
+from .products import StockAddIn, add_stock, net_of, set_pack_size, summary
+from .units import UnitError, convert, fmt_amount, normalize_unit
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ class CommitLine(BaseModel):
     line_total_eur: float | None = Field(None, ge=0)
     pack_size: float | None = Field(None, gt=0, description="Net amount of one pack/piece, confirmed by the user")
     pack_unit: str | None = Field(None, description="g or ml")
+    opened: bool = Field(False, description="Already opened (home stock-take): one pack/piece, or a weighed amount")
+    best_before: date | None = None
+    location: str | None = Field(None, description="Fridge, Freezer or Pantry; default: the product's")
 
 
 class ReceiptCommitIn(BaseModel):
@@ -183,11 +187,41 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
                 unit=line.unit,
                 price_total=line.line_total_eur,
                 store=store,
+                best_before=line.best_before,
+                location=line.location,
             ),
         )
-        return {"added": res["message"]}
+        message = res["message"]
+        if line.opened:
+            message += await _open_added(svc, line, res)
+        return {"added": message}
     except Exception as e:  # noqa: BLE001 - report per line
         return {"error": str(e)}
+
+
+async def _open_added(svc: Services, line: CommitLine, res: dict[str, Any]) -> str:
+    """Mark what was just added as opened: one pack/piece of a counted line, the whole of a weighed one."""
+    product = await svc.grocy.object("products", line.product_id)
+    added, stock_unit = float(res["added"]), res["unit"]
+    amount = added
+    try:
+        counted = normalize_unit(line.unit) in ("piece", "pack")
+    except UnitError:
+        counted = False
+        amount = 1.0  # one of the product's own Grocy units ("Bottle")
+    if counted:
+        net, net_unit = net_of(await svc.grocy.userfields("products", line.product_id))
+        with contextlib.suppress(UnitError):
+            amount = convert(1, line.unit, stock_unit, net_amount_per_pack=net, net_unit=net_unit)
+    amount = min(amount, added)
+    await svc.grocy.open_stock(line.product_id, round(amount, 4))
+    svc.db.add_event(
+        "opened",
+        f"Opened {fmt_amount(amount, stock_unit)} {product['name']} (stock-take)",
+        product_id=line.product_id,
+        product_name=product["name"],
+    )
+    return f", {fmt_amount(amount, stock_unit)} of it opened"
 
 
 async def commit_lines(svc: Services, body: ReceiptCommitIn) -> dict[str, Any]:

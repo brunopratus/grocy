@@ -37,6 +37,14 @@
   <section id="home" class="panel" hidden>
     <div class="hello"><h2>Kitchen</h2><p id="home-sub">What do you want to do?</p></div>
     <div id="credit-warn" class="card warn-card" hidden></div>
+    <div id="first-step" class="card first-step" hidden>
+      <span class="badge">First step</span>
+      <h2>Add what's already at home</h2>
+      <p class="small muted">Do it once: go through the fridge, freezer and pantry, scan or name each item, and tick what's open.
+        No prices needed. After that, Grocy+ keeps the stock up to date from your shopping.</p>
+      <button id="first-step-go" type="button">Start</button>
+      <a href="#" id="first-step-skip" class="small muted">Skip, my stock is already in Grocy</a>
+    </div>
     <button type="button" class="home-search" data-go="stock"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/></svg><span>Search your stock…</span></button>
     <div class="grid">
       <button data-go="receipt" class="main wide"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h11.2L21 7H6M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg><span>Finish shopping<small>Receipt → checklist → stock</small></span></button>
@@ -203,6 +211,7 @@
       <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></svg>Receipt: take a photo, or choose a photo or PDF<input name="image" type="file" accept="image/*,application/pdf" required></label>
       <button type="submit">Read receipt</button>
     </form>
+    <button id="manual-start" type="button" class="secondary">No receipt, or it won't read? Enter the items manually</button>
     <div id="receipt-result"></div>
   </section>
 

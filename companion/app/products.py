@@ -658,6 +658,60 @@ async def generic_nutrition(svc: Services, advice: ProduceAdvice) -> FoodCandida
     return foods[pick.index]
 
 
+async def create_generic_product(
+    svc: Services, name: str, store: str | None = None
+) -> tuple[dict[str, Any], ProduceAdvice]:
+    """A product without barcode (produce, bulk food): Claude names it, nutrition from Fineli/USDA, kept in g."""
+    advice = await _produce_advice(svc, name)
+    match = await generic_nutrition(svc, advice)
+    product = await create_product(
+        svc,
+        NewProduct(
+            name=name.strip().capitalize(),
+            description=f"{advice.english_name}" + (f" — {match.label}" if match else ""),
+            stock_unit="g",
+            purchase_unit="g",
+            location=advice.storage_location,
+            best_before_days=advice.shelf_life_days,
+            after_open_days=advice.shelf_life_after_opening_days,
+            net_amount_per_pack=advice.typical_piece_weight_g,
+            net_unit="g" if advice.typical_piece_weight_g else None,
+            nutrition=match.nutrition if match else None,
+            nutrition_source=match.source if match else None,
+            store=store,
+        ),
+    )
+    return product, advice
+
+
+class ByNameIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    create: bool = Field(False, description="Create it even when a similar product exists")
+
+
+async def product_by_name(svc: Services, body: ByNameIn) -> dict[str, Any]:
+    """Item added by name (no barcode): the existing product, a similar one to confirm, or a new one."""
+    from .receipts import similar_product  # avoid an import cycle
+
+    existing = await find_product_by_name(svc, body.name)
+    if existing:
+        uf = await svc.grocy.userfields("products", int(existing["id"]))
+        return {"status": "existing", "product": summary(existing, svc, uf)}
+    if not body.create:
+        catalog = [{"id": int(p["id"]), "name": p["name"]} for p in await svc.products()]
+        similar = similar_product(catalog, body.name)
+        if similar:
+            p = await svc.grocy.object("products", similar)
+            return {
+                "status": "suggestion",
+                "product": None,
+                "suggestion": summary(p, svc, await svc.grocy.userfields("products", similar)),
+            }
+    product, _ = await create_generic_product(svc, body.name)
+    uf = await svc.grocy.userfields("products", int(product["id"]))
+    return {"status": "created", "product": summary(product, svc, uf)}
+
+
 async def add_produce(svc: Services, body: ProduceIn) -> dict[str, Any]:
     if not body.weight_g and not body.count:
         raise CaptureError("Give weight_g or count")
@@ -665,25 +719,7 @@ async def add_produce(svc: Services, body: ProduceIn) -> dict[str, Any]:
     created = False
     advice: ProduceAdvice | None = None
     if product is None:
-        advice = await _produce_advice(svc, body.name)
-        match = await generic_nutrition(svc, advice)
-        product = await create_product(
-            svc,
-            NewProduct(
-                name=body.name.strip().capitalize(),
-                description=f"{advice.english_name}" + (f" — {match.label}" if match else ""),
-                stock_unit="g",
-                purchase_unit="g",
-                location=advice.storage_location,
-                best_before_days=advice.shelf_life_days,
-                after_open_days=advice.shelf_life_after_opening_days,
-                net_amount_per_pack=advice.typical_piece_weight_g,
-                net_unit="g" if advice.typical_piece_weight_g else None,
-                nutrition=match.nutrition if match else None,
-                nutrition_source=match.source if match else None,
-                store=body.store,
-            ),
-        )
+        product, advice = await create_generic_product(svc, body.name, body.store)
         created = True
 
     pid = int(product["id"])
@@ -777,7 +813,11 @@ async def add_stock(svc: Services, body: StockAddIn) -> dict[str, Any]:
     net, net_unit = net_of(uf)
     unit = body.unit or stock_unit
     try:
-        amount = convert(body.amount, unit, stock_unit, net_amount_per_pack=net, net_unit=net_unit)
+        # a product's own Grocy unit ("Bottle") needs no conversion, even if it isn't a known unit
+        if unit.strip().lower() == str(stock_unit).strip().lower():
+            amount = body.amount
+        else:
+            amount = convert(body.amount, unit, stock_unit, net_amount_per_pack=net, net_unit=net_unit)
     except UnitError as e:
         raise CaptureError(str(e)) from e
     return await _book_purchase(svc, product, amount, body.price_total, body.store, body.best_before, body.location)

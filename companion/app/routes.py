@@ -91,6 +91,7 @@ async def lookups(request: Request) -> dict[str, Any]:
         "people": svc.settings.people,
         "version": svc.settings.version,
         "testing": svc.settings.testing,
+        "home_stock_done": svc.db.get_kv("home_stock_done") == "1",
     }
 
 
@@ -130,6 +131,11 @@ async def shelf_life(product_id: int, request: Request, body: products.ShelfLife
 @router.get("/products/{product_id}/card")
 async def product_card(product_id: int, request: Request) -> dict[str, Any]:
     return await receipts.product_card(svc_of(request), product_id)
+
+
+@router.post("/products/by-name")
+async def product_by_name(body: products.ByNameIn, request: Request) -> dict[str, Any]:
+    return await products.product_by_name(svc_of(request), body)
 
 
 @router.post("/products/produce")
@@ -303,6 +309,17 @@ async def receipt_photo(request: Request, image: UploadFile = File(...), commit:
 @router.get("/receipts/inbox")
 async def receipt_inbox(request: Request) -> dict[str, Any]:
     return await receipts.inbox(svc_of(request))
+
+
+class HomeStockIn(BaseModel):
+    done: bool = True
+
+
+@router.post("/setup/home-stock")
+async def home_stock(body: HomeStockIn, request: Request) -> dict[str, Any]:
+    """The one-time 'add what's already at home' step: done (or skipped) hides it from the home screen."""
+    svc_of(request).db.set_kv("home_stock_done", "1" if body.done else "0")
+    return {"home_stock_done": body.done}
 
 
 @router.post("/receipts/commit")
