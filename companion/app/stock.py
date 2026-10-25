@@ -445,18 +445,18 @@ async def unopen(svc: Services, product_id: int) -> dict[str, Any]:
             log.info("undo of opening %s failed: %s", tx, e)
     else:
         # Opened elsewhere (e.g. ticked on the stock-take list): just clear the flag
-        e = max(opened, key=lambda e: e.get("opened_date") or "")
+        last = max(opened, key=lambda x: x.get("opened_date") or "")
         await svc.grocy.edit_stock_entry(
-            int(e["id"]),
+            int(last["id"]),
             {
-                "amount": float(e["amount"]),
-                "best_before_date": e.get("best_before_date"),
-                "location_id": e.get("location_id"),
-                "shopping_location_id": e.get("shopping_location_id"),
-                "price": e.get("price"),
+                "amount": float(last["amount"]),
+                "best_before_date": last.get("best_before_date"),
+                "location_id": last.get("location_id"),
+                "shopping_location_id": last.get("shopping_location_id"),
+                "price": last.get("price"),
                 "open": 0,
-                "purchased_date": e.get("purchased_date"),
-                "note": e.get("note"),
+                "purchased_date": last.get("purchased_date"),
+                "note": last.get("note"),
             },
         )
     message = f"{product['name']}: marked as not opened"
