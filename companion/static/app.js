@@ -163,9 +163,10 @@ function loadFirstStep() {
 }
 
 async function startHomeStock() {
-  if (!lastReceipt) { try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ } }
-  if (lastReceipt?.mode === "home") return show("receipt");
-  if (lastReceipt?.lines.some((l) => l.include && !l.done) && !confirm("A shopping checklist is still open. Replace it with the stock-take?")) return;
+  let saved = lastReceipt;
+  if (!saved) { try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ } }
+  if (saved?.mode === "home") return show("receipt");  // the receipt screen loads and draws the saved list
+  if (saved?.lines.some((l) => l.include && !l.done) && !confirm("A shopping checklist is still open. Replace it with the stock-take?")) return;
   startList("home");
 }
 
@@ -517,7 +518,10 @@ async function openFinishShopping() {
   if (!lastReceipt) {
     try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { lastReceipt = null; }
     lastReceipt?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
-    if (lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) renderReceipt();
+  }
+  // Draw a saved list that isn't on screen yet (e.g. opened from "Continue the stock-take" after a reload)
+  if ((lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) && !$("#receipt-result").children.length) {
+    renderReceipt();
   }
   syncReceiptForm();
   if (lastReceipt?.mode === "home") return;
