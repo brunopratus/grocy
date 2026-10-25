@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import alerts
+from . import alerts, names
 from .bugs import install_log_buffer
 from .claude import ClaudeClient, ClaudeError
 from .config import Settings, get_settings
@@ -43,6 +43,9 @@ async def _bootstrap(svc: Services) -> None:
         try:
             report = await run_setup(svc.grocy, svc.catalog)
             log.info("setup done: %s", report)
+            if svc.settings.english_names:
+                with suppress(Exception):  # names are a convenience; never block startup
+                    log.info("English names: %s", await names.rename_to_english(svc))
             return
         except (GrocyError, httpx.HTTPError) as e:
             log.warning("setup attempt %d failed: %s", attempt + 1, e)

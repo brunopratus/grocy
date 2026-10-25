@@ -75,6 +75,7 @@ function show(id) {
   // Back on the receipt (or elsewhere): line context done. A bug report in between keeps it.
   if (!["scan", "label", "bug"].includes(id)) receiptCtx = null;
   if (id === "scan" && changed && from !== "bug") clearScan();
+  if (id === "label" && receiptCtx == null) packForLabel(null);  // on its own: ask for the pack size
   const forLine = receiptCtx != null && (id === "scan" || id === "label")
     ? (receiptCtx === -1 ? { text: "New item for the list" } : lastReceipt?.lines[receiptCtx]) : null;
   $("#ctx").hidden = !forLine;
@@ -152,20 +153,18 @@ async function loadHomeDue() {
 }
 
 // One-time first step: put what's already at home into Grocy (shown until done or skipped)
-function loadFirstStep() {
+async function loadFirstStep() {
   const card = $("#first-step");
   card.hidden = lookups.home_stock_done !== false;
   if (card.hidden) return;
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ }
-  const going = (lastReceipt || saved)?.mode === "home";
+  if (!lastReceipt) lastReceipt = await loadSavedList();
+  const going = lastReceipt?.mode === "home";
   $("#first-step-go").textContent = going ? "Continue the stock-take" : "Start";
 }
 
 async function startHomeStock() {
-  let saved = lastReceipt;
-  if (!saved) { try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* none */ } }
-  if (saved?.mode === "home") return show("receipt");  // the receipt screen loads and draws the saved list
+  const saved = lastReceipt || await loadSavedList();
+  if (saved?.mode === "home") { lastReceipt = saved; return show("receipt"); }  // the receipt screen loads and draws the saved list
   if (saved?.lines.some((l) => l.include && !l.done) && !confirm("A shopping checklist is still open. Replace it with the stock-take?")) return;
   startList("home");
 }
@@ -183,22 +182,81 @@ async function startScan() {
   clearScan();
   const reader = new ZXingBrowser.BrowserMultiFormatReader();
   try {
+    scanState("looking");
     scanControls = await reader.decodeFromConstraints(
       { video: { facingMode: "environment" } }, $("#video"),
       (result) => {
-        if (!result) return;
+        if (!result) {
+          if (Date.now() - lastSeen > 700) scanState("looking");  // barcode left the picture
+          return;
+        }
+        lastSeen = Date.now();
         const code = result.getText();
         // Accept a code only when its check digit is right and two reads in a row agree:
         // single misreads (another barcode in view, a blurry frame) are skipped.
-        if (!validBarcode(code) || code !== lastRead) { lastRead = code; return; }
-        stopScan();
+        if (!validBarcode(code) || code !== lastRead) {
+          lastRead = code;
+          scanState("seen", result.getResultPoints());
+          return;
+        }
+        scanState("got", result.getResultPoints(), code);
+        stopScan(true);
         navigator.vibrate?.(80);
         $("#manual-code [name=code]").value = code;
         toast(`Barcode ${code}`);
         lookupCode(code).catch((err) => toast(err.message, 6000));
       },
     );
-  } catch (e) { toast(`Camera: ${e.message}`); }
+  } catch (e) { scanState("off"); toast(`Camera: ${e.message}`); }
+}
+
+// What the scanner sees: a frame around the barcode, yellow while reading, green once it's certain
+let lastSeen = 0;
+const SCAN_TEXT = {
+  looking: "Looking for a barcode… hold it flat inside the frame",
+  seen: "Barcode found: hold still…",
+  got: "Got it",
+};
+function scanState(state, points, code) {
+  const vf = $("#viewfinder");
+  const running = state !== "off" && state !== "got";
+  $("#scan-start").textContent = running ? "Camera on" : "Start camera";
+  $("#scan-start").disabled = running;
+  $("#scan-hint").textContent = running ? "Move closer if the frame doesn't appear; good light helps."
+    : "Start the camera and hold the barcode in view: it's read automatically.";
+  // the stopped camera loses its size: hold the picture's size while "Got it" shows
+  vf.style.height = state === "got" ? `${vf.offsetHeight}px` : "";
+  vf.dataset.state = state;
+  const status = $("#scan-status");
+  status.hidden = state === "off";
+  status.textContent = state === "got" ? `${SCAN_TEXT.got}: ${code} ✓` : SCAN_TEXT[state] || "";
+  drawScanBox(state === "seen" || state === "got" ? points : null, state);
+}
+
+function drawScanBox(points, state) {
+  const canvas = $("#scan-box"), video = $("#video");
+  const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!points?.length || !video.videoWidth) return;
+  // The video is scaled to fit its box (object-fit: contain): map camera pixels to screen pixels
+  const k = Math.min(w / video.videoWidth, h / video.videoHeight);
+  const ox = (w - video.videoWidth * k) / 2, oy = (h - video.videoHeight * k) / 2;
+  // Got it: the camera stops next, so keep the last picture under the green frame
+  if (state === "got") ctx.drawImage(video, ox * dpr, oy * dpr, video.videoWidth * k * dpr, video.videoHeight * k * dpr);
+  const xs = points.map((p) => ox + p.getX() * k), ys = points.map((p) => oy + p.getY() * k);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const bw = Math.max(x1 - x0, 40);
+  if (y1 - y0 < bw * 0.3) { const cy = (y0 + y1) / 2; y0 = cy - bw * 0.25; y1 = cy + bw * 0.25; }  // 1D barcode: a line
+  const pad = bw * 0.08;
+  ctx.scale(dpr, dpr);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = state === "got" ? "#7BE07B" : "#FFC857";
+  ctx.beginPath();
+  ctx.roundRect(x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad, 10);
+  ctx.stroke();
 }
 let lastRead = null;
 function validBarcode(code) {
@@ -214,7 +272,11 @@ function clearScan() {
   $("#scan-result").innerHTML = "";
   $("#add-stock").hidden = true;
 }
-function stopScan() { lastRead = null; if (scanControls) { scanControls.stop(); scanControls = null; } }
+function stopScan(keepState = false) {
+  lastRead = null;
+  if (scanControls) { scanControls.stop(); scanControls = null; }
+  if (!keepState) scanState("off");
+}
 
 async function lookupCode(code) {
   const r = await api(`/products/barcode/${encodeURIComponent(code)}`, { method: "POST", busy: "Looking up…" });
@@ -224,6 +286,7 @@ async function lookupCode(code) {
     if (p) return assignToLine(p);
     $("#label-form [name=product_id]").value = "new";
     $("#label-form [name=barcode]").value = code;
+    packForLabel(receiptCtx >= 0 ? lastReceipt.lines[receiptCtx] : null);
     show("label");
     return toast("Not found in Open Food Facts: take a photo of the nutrition table", 6000);
   }
@@ -294,10 +357,8 @@ function amountHtml(l, i) {
     <input class="rpack" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="${needsPack(l) ? "size" : "optional"}" value="${l.pack_size ?? ""}">
     <select class="rpunit" data-i="${i}">${pu}</select> <span class="rtotal">${total}</span>`;
   }
-  const cont = ["g", "kg"].includes(l.unit) ? `<label class="rcont">weighed in its bottle / jar? minus
-    <input class="rcontg" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="0" value="${l.container_g ?? ""}"> g</label>` : "";
   return `<div class="ramount"><input class="rqty" data-i="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="how much" value="${l.quantity ?? ""}">
-    <select class="runit" data-i="${i}">${units}</select>${pack}</div>${cont}`;
+    <select class="runit" data-i="${i}">${units}</select>${pack}</div>`;
 }
 
 function chip(ok, text, warn) {
@@ -443,8 +504,6 @@ function renderReceipt() {
   const r = lastReceipt;
   r.mode = r.mode || "receipt";
   r.lines.forEach(initLine);
-  const opts = (sel) => `<option value="">${sel ? "Not this product" : "Already in Grocy under another name? Pick it"}</option>` + lookups.products
-    .map((p) => `<option value="${p.id}"${p.id === sel ? " selected" : ""}>${esc(p.name)}</option>`).join("");
   const rows = r.lines.map((l, i) => {
     const st = lineState(l);
     const suggest = !l.product && l.suggestion && !l.suggestion_no
@@ -455,16 +514,16 @@ function renderReceipt() {
       !l.product ? `<button type="button" class="secondary" data-act="scan" data-i="${i}">Scan barcode</button>` : "",
       !l.product && l.added_by_hand && (!l.suggestion || l.suggestion_no) ? `<button type="button" class="secondary" data-act="create" data-i="${i}">Create "${esc(l.text)}"</button>` : "",
       l.product && !hasNutrition(l.product) ? `<button type="button" class="secondary" data-act="label" data-i="${i}">Photo of label</button>` : "",
+      l.product ? `<button type="button" class="secondary" data-act="unlink" data-i="${i}">Not this product</button>` : "",
     ].join("");
     const price = r.mode === "receipt" && !l.added_by_hand ? `<span class="num">${eur(l.line_total_eur)}</span>` : "";
     return `<li class="rline${l.is_food ? "" : " nonfood"}${l.include ? "" : " off"}" data-i="${i}">
       <div class="rtop"><label class="check"><input type="checkbox" class="rinc" data-i="${i}"${l.include ? " checked" : ""}>
-        <strong>${esc(l.text)}</strong></label>${price}</div>
-      <div class="small muted">${esc(l.name_en)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}${l.product && l.product.name !== l.text ? ` · <span class="good">${esc(l.product.name)}</span>` : ""}</div>
+        <strong>${esc(lineTitle(l))}</strong></label>${price}</div>
+      <div class="small muted">${lineSub(l)}${l.is_food ? "" : ' · <span class="badge">not food</span>'}</div>
       ${l.include ? `<div class="chips">${chipsHtml(l)}</div><div class="rq">${shelfQuestionHtml(l, i)}</div>
       ${l.product ? amountHtml(l, i) + extrasHtml(l, i, r.mode) : ""}
-      ${suggest}${actions ? `<div class="ractions">${actions}</div>` : ""}
-      <select class="rprod" data-i="${i}" aria-label="Grocy product">${opts(l.product_id)}</select>` : ""}
+      ${suggest}${actions ? `<div class="ractions">${actions}</div>` : ""}` : ""}
       ${l.include && l.product ? `<div class="small warn rhint"${st.ok ? " hidden" : ""}>${hintText(l)}</div>` : ""}</li>`;
   }).join("");
   const { ready, html: sumHtml } = summaryHtml(r);
@@ -485,6 +544,13 @@ function renderReceipt() {
   ensureShelfLife();
 }
 
+// Lines read in English: the Grocy product's (English) name, else Claude's translation of the receipt text
+function lineTitle(l) { return l.product?.name || l.name_en || l.text; }
+function lineSub(l) {
+  const title = lineTitle(l);
+  return l.text && l.text.toLowerCase() !== title.toLowerCase() ? `${l.added_by_hand ? "typed" : "receipt"}: ${esc(l.text)}` : "";
+}
+
 function commitText(ready) {
   const word = lastReceipt.mode === "receipt" ? "ready line" : "item";
   return `Add ${ready} ${word}${ready === 1 ? "" : "s"} to stock`;
@@ -502,8 +568,34 @@ function saveReceipt() {
   try {
     if (lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
     else localStorage.removeItem("gp-receipt");
-  } catch { /* storage blocked: the checklist just isn't kept */ }
+  } catch { /* storage blocked: the server copy still has it */ }
   syncReceiptForm();
+  clearTimeout(listTimer);
+  listTimer = setTimeout(pushList, 1200);
+}
+
+// A copy of the open list on the server: the phone's storage can be cleared (iPhone does that to
+// sites not opened for a while), and a stock-take done in parts must survive that.
+let listTimer = null;
+function pushList() {
+  clearTimeout(listTimer);
+  const keep = lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt");
+  fetch("/lists/current", {
+    method: "PUT", credentials: "same-origin", keepalive: true,
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(keep ? lastReceipt : null),
+  }).catch(() => { /* offline: the phone's copy is still there; sent with the next change */ });
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden && listTimer) pushList(); });
+
+async function loadSavedList() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* blocked */ }
+  if (!saved) {
+    try { saved = await api("/lists/current"); } catch { /* offline */ }
+    if (saved) toast("Your open list was restored from the server", 5000);
+  }
+  saved?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
+  return saved;
 }
 
 // The receipt photo form only belongs to "Finish shopping" with a receipt (or nothing started yet)
@@ -515,10 +607,7 @@ function syncReceiptForm() {
 }
 
 async function openFinishShopping() {
-  if (!lastReceipt) {
-    try { lastReceipt = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { lastReceipt = null; }
-    lastReceipt?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
-  }
+  if (!lastReceipt) lastReceipt = await loadSavedList();
   // Draw a saved list that isn't on screen yet (e.g. opened from "Continue the stock-take" after a reload)
   if ((lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) && !$("#receipt-result").children.length) {
     renderReceipt();
@@ -534,11 +623,25 @@ async function openFinishShopping() {
   } catch (err) { $("#receipt-inbox").innerHTML = ""; }
 }
 
+// The pack size is already on the list line (typed, or the weight entered): the label screen doesn't ask again
+function packForLabel(l) {
+  let amount = null, unit = null;
+  if (l?.pack_size) [amount, unit] = [l.pack_size, l.pack_unit];
+  else if (l && MASS_VOL.includes(l.unit) && l.quantity > 0 && COUNT_UNITS.includes(l.product?.stock_unit || "piece")) {
+    [amount, unit] = ["kg", "l"].includes(l.unit) ? [l.quantity * 1000, l.unit === "kg" ? "g" : "ml"] : [l.quantity, l.unit];
+  }
+  const f = $("#label-form");
+  f.net_amount.value = amount ?? "";
+  if (unit) f.net_unit.value = unit;
+  $("#label-pack").hidden = amount != null || (l != null && MASS_VOL.includes(l.unit));
+}
+
 async function assignToLine(card) {
   let l = lastReceipt.lines[receiptCtx];
   if (receiptCtx === -1) { l = newLine(card); lastReceipt.lines.push(l); }  // "Add an item" by scanning
   receiptCtx = null;
-  Object.assign(l, { product_id: card.id, product: card, include: true, pack_size: null, shelf: null });
+  const same = l.product_id === card.id;  // e.g. after the label photo: keep the amount and pack size typed
+  Object.assign(l, { product_id: card.id, product: card, include: true, shelf: null, ...(same ? {} : { pack_size: null }) });
   await refreshLookups();
   renderReceipt();
   show("receipt");
@@ -578,7 +681,6 @@ async function commitReceipt() {
     ...(l.opened ? { opened: true } : {}),
     ...(l.best_before ? { best_before: l.best_before } : {}),
     ...(l.location ? { location: l.location } : {}),
-    ...(["g", "kg"].includes(l.unit) && l.container_g ? { container_g: l.container_g } : {}),
   }));
   const store = lastReceipt.mode === "home" ? null : lastReceipt.store;
   const r = await api("/receipts/commit", { method: "POST", json: { store, lines }, busy: "Adding to stock…" });
@@ -665,6 +767,12 @@ function wireReceipt() {
         await refreshLookups();
         return renderReceipt();
       }
+      if (b.dataset.act === "unlink") {
+        // Wrong match: forget it; scan the barcode, take the suggestion or create the product instead
+        const l = lastReceipt.lines[Number(b.dataset.i)];
+        Object.assign(l, { product_id: null, product: null, suggestion: null, suggestion_no: true, shelf: null, added_by_hand: true });
+        return renderReceipt();
+      }
       if (b.dataset.act === "sugg-yes" || b.dataset.act === "sugg-no") {
         const l = lastReceipt.lines[Number(b.dataset.i)];
         if (b.dataset.act === "sugg-yes") Object.assign(l, { product_id: l.suggestion.id, product: l.suggestion, include: true, shelf: null });
@@ -677,6 +785,7 @@ function wireReceipt() {
       if (b.dataset.act === "label") {
         $("#label-form [name=product_id]").value = String(l.product.id);
         $("#label-form [name=barcode]").value = "";
+        packForLabel(l);
         show("label");
       }
     } catch (err) { toast(err.message, 6000); }
@@ -961,7 +1070,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   on("#logout", "click", async (e) => { e.preventDefault(); await api("/logout", { method: "POST" }); show("login"); });
 
   on("#scan-start", "click", startScan);
-  on("#scan-stop", "click", stopScan);
+  on("#scan-stop", "click", () => stopScan());
   on("#manual-code", "submit", (e) => {
     const code = e.target.code.value.trim();
     if (!code) return toast("Type the numbers under the barcode, or tap Start camera");

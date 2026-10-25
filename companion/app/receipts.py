@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from .claude import compact_json, image_block, pdf_block
 from .deps import Services
+from .names import originals
 from .products import StockAddIn, add_stock, net_of, set_pack_size, summary
 from .units import UnitError, convert, dimension, fmt_amount, normalize_unit
 
@@ -101,7 +102,11 @@ async def import_photo(
     original = folder / f"{datetime.now():%Y%m%d-%H%M%S}.{'pdf' if is_pdf else 'jpg'}"
     original.write_bytes(image)
 
-    catalog = [{"id": int(p["id"]), "name": p["name"]} for p in await svc.products()]
+    was = originals(svc)
+    catalog = [
+        {"id": int(p["id"]), "name": p["name"], **({"was": was[int(p["id"])]} if int(p["id"]) in was else {})}
+        for p in await svc.products()
+    ]
     parsed = await svc.claude.structured(
         task="receipt_photo",
         schema=ReceiptParse,
@@ -152,7 +157,7 @@ def similar_product(catalog: list[dict[str, Any]], *names: str) -> int | None:
     words = [w for n in names if n for w in _norm(n)]
     best, best_score = None, 0.0
     for product in catalog:
-        for pw in _norm(product["name"]):
+        for pw in _norm(product["name"] + " " + product.get("was", "")):
             for w in words:
                 score = difflib.SequenceMatcher(None, w, pw).ratio()
                 if score > best_score:
@@ -183,6 +188,7 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
                 pack_unit = "g"
             await set_pack_size(svc, await svc.grocy.object("products", line.product_id), line.pack_size, pack_unit)
         quantity = line.quantity
+        await _pack_from_weight(svc, line)
         if line.container_g is not None and _is_weight(line.unit):
             svc.db.set_kv(f"container_g:{line.product_id}", str(line.container_g))  # remembered for weighing later
             quantity -= convert(line.container_g, "g", line.unit)
@@ -206,6 +212,30 @@ async def _add_line(svc: Services, line: CommitLine, store: str | None) -> dict[
         return {"added": message}
     except Exception as e:  # noqa: BLE001 - report per line
         return {"error": str(e)}
+
+
+async def _pack_from_weight(svc: Services, line: CommitLine) -> None:
+    """A product kept in pieces whose pack size isn't known yet, entered by weight or volume
+    ("1.5 kg of oat flakes"): that is one pack of 1.5 kg. Remember it, so it converts."""
+    if line.pack_size:
+        return
+    try:
+        dim = dimension(line.unit)
+    except UnitError:
+        return
+    if dim == "count":
+        return
+    product = await svc.grocy.object("products", line.product_id)
+    try:
+        if dimension(svc.catalog.unit_of(product.get("qu_id_stock"))) != "count":
+            return
+    except UnitError:
+        pass  # the product's own unit ("Bottle"): counted
+    net, _ = net_of(await svc.grocy.userfields("products", line.product_id))
+    if net:
+        return
+    base = "g" if dim == "mass" else "ml"
+    await set_pack_size(svc, product, convert(line.quantity, line.unit, base), base)
 
 
 def _is_weight(unit: str) -> bool:

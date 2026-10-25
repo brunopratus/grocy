@@ -33,6 +33,7 @@ class Settings:
     off_user_agent: str
     version: str = "dev"
     testing: bool = True
+    english_names: bool = True  # name products in English (ENGLISH_NAMES=false keeps the names as found)
     bug_github_repo: str = ""
     bug_github_token: str = ""
 
@@ -67,6 +68,7 @@ def get_settings() -> Settings:
         version=(env("RAILWAY_GIT_COMMIT_SHA") or env("GIT_COMMIT") or "dev")[:7],
         # Test phase: bug icon on every screen. TESTING=false for production (the home screen link stays).
         testing=_bool(env("TESTING"), True),
+        english_names=_bool(env("ENGLISH_NAMES"), True),
         bug_github_repo=env("BUG_GITHUB_REPO", ""),
         bug_github_token=env("BUG_GITHUB_TOKEN", ""),
     )

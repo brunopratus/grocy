@@ -26,6 +26,7 @@ TASK_NAMES = {
     "due_date": "Reading due dates",
     "food_pick": "Matching market produce",
     "produce_translate": "Naming market produce",
+    "english_names": "English product names",
 }
 
 

@@ -287,3 +287,17 @@ img.shot { display: block; width: 45%; margin: .3rem 0 .9rem; border: 1px solid 
 .datef.has .dph { display: none; }
 .datef input { width: 100%; }
 .rbb .datef input { min-width: 9.5rem; }
+
+/* Scanner: a guide frame, and a box around the barcode (yellow: reading, green: got it) */
+.viewfinder { position: relative; margin-bottom: .7rem; }
+.viewfinder video { display: block; margin-bottom: 0; }
+#scan-box { position: absolute; left: 0; top: 0; pointer-events: none; }
+.vf-guide { position: absolute; left: 12%; right: 12%; top: 30%; bottom: 30%; border: 2px dashed rgba(255, 255, 255, 0.45);
+  border-radius: 12px; pointer-events: none; display: none; }
+.viewfinder[data-state="looking"] .vf-guide { display: block; }
+.vf-status { position: absolute; left: .6rem; right: .6rem; bottom: .6rem; padding: .45rem .7rem; border-radius: 10px;
+  background: rgba(10, 12, 11, 0.78); color: var(--text); font-size: .85rem; text-align: center; }
+.viewfinder[data-state="seen"] .vf-status { color: #FFC857; }
+.viewfinder[data-state="got"] .vf-status { color: #7BE07B; font-weight: 600; }
+#scan-box { border-radius: 14px; }
+.viewfinder[data-state="got"] video { visibility: hidden; }

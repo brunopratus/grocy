@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from .claude import compact_json, image_block
 from .deps import Services
 from .grocy import GrocyError, file_userfield_value
+from .names import originals, rename_to_english
 from .nutrition import (
     FoodCandidate,
     OffUnavailable,
@@ -139,11 +140,14 @@ def summary(product: dict[str, Any], svc: Services, uf: dict[str, Any] | None = 
 
 
 async def find_product_by_name(svc: Services, name: str) -> dict[str, Any] | None:
+    """Exact name, or the original (e.g. Lithuanian) name of a product renamed in English."""
     target = name.strip().lower()
-    for p in await svc.products():
+    products = await svc.products()
+    for p in products:
         if p["name"].strip().lower() == target:
             return p
-    return None
+    was = {pid for pid, orig in originals(svc).items() if orig.strip().lower() == target}
+    return next((p for p in products if int(p["id"]) in was), None)
 
 
 async def unique_name(svc: Services, name: str) -> str:
@@ -231,6 +235,8 @@ async def create_product(svc: Services, spec: NewProduct) -> dict[str, Any]:
         product_name=name,
         data={"source": spec.nutrition_source, "barcode": spec.barcode},
     )
+    if svc.settings.english_names:
+        await rename_to_english(svc, [pid])
     return await svc.grocy.object("products", pid)
 
 
@@ -698,7 +704,10 @@ async def product_by_name(svc: Services, body: ByNameIn) -> dict[str, Any]:
         uf = await svc.grocy.userfields("products", int(existing["id"]))
         return {"status": "existing", "product": summary(existing, svc, uf)}
     if not body.create:
-        catalog = [{"id": int(p["id"]), "name": p["name"]} for p in await svc.products()]
+        was = originals(svc)
+        catalog = [
+            {"id": int(p["id"]), "name": p["name"], "was": was.get(int(p["id"]), "")} for p in await svc.products()
+        ]
         similar = similar_product(catalog, body.name)
         if similar:
             p = await svc.grocy.object("products", similar)

@@ -60,3 +60,16 @@ async def test_own_grocy_unit_is_added_as_is(settings, catalog, fake_grocy):
     assert r["added"] == 1, r
     assert next(c for c in fake_grocy.calls if c[0] == "add_stock")[2] == 2
     assert ("open", 3, 1, None) in fake_grocy.calls
+
+
+@pytest.mark.asyncio
+async def test_weight_of_a_product_kept_in_pieces_sets_its_pack_size(settings, catalog, fake_grocy):
+    fake_grocy.seed(
+        "products", {"id": 9, "name": "Oat flakes", "qu_id_stock": QU["piece"], "qu_id_purchase": QU["piece"]}
+    )
+    svc = make_services(settings, catalog, fake_grocy)
+    body = receipts.ReceiptCommitIn(lines=[receipts.CommitLine(product_id=9, quantity=1.5, unit="kg")])
+    r = await receipts.commit_lines(svc, body)
+    assert r["added"] == 1, r
+    assert fake_grocy.uf[("products", 9)] == {"net_amount_per_pack": 1500, "net_unit": "g"}
+    assert next(c for c in fake_grocy.calls if c[0] == "add_stock")[2] == 1  # one pack of 1.5 kg

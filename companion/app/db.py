@@ -217,6 +217,11 @@ class Database:
             row = self._conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
+    def kv_prefix(self, prefix: str) -> dict[str, str]:
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value FROM kv WHERE key LIKE ?", (prefix + "%",)).fetchall()
+        return {r["key"]: r["value"] for r in rows if r["key"].startswith(prefix)}
+
     def set_kv(self, key: str, value: str) -> None:
         with self._lock:
             self._conn.execute(

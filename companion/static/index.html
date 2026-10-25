@@ -62,7 +62,12 @@
   <!-- Scan -->
   <section id="scan" class="panel" hidden>
     <div class="card">
-      <video id="video" playsinline muted></video>
+      <div class="viewfinder" id="viewfinder">
+        <video id="video" playsinline muted></video>
+        <canvas id="scan-box" aria-hidden="true"></canvas>
+        <div class="vf-guide" aria-hidden="true"></div>
+        <div id="scan-status" class="vf-status" role="status" hidden></div>
+      </div>
       <p id="scan-hint" class="small muted">Start the camera and hold the barcode in view: it's read automatically.</p>
       <div class="row">
         <button id="scan-start">Start camera</button>
@@ -99,7 +104,7 @@
       <label>Product<select name="product_id" class="products"><option value="new">New product</option></select></label>
       <label>Barcode (optional)<input name="barcode" inputmode="numeric"></label>
       <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>Nutrition table<input name="img1" type="file" accept="image/*" capture="environment" required></label>
-      <div class="row">
+      <div class="row" id="label-pack">
         <label>Pack size, if not on the photo<input name="net_amount" type="text" inputmode="decimal" pattern="\d+([.,]\d+)?" autocomplete="off" placeholder="e.g. 500"></label>
         <label class="unit">Unit<select name="net_unit"><option>g</option><option>ml</option></select></label>
       </div>

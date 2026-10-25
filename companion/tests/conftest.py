@@ -28,6 +28,7 @@ def settings():
         db_path=":memory:",
         anthropic_api_key="test",
         ntfy_topic_url="",
+        english_names=False,
     )
 
 

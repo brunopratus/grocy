@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from . import alerts, bugs, mealplan, products, receipts, recipes, reports, stock, usage
+from . import alerts, bugs, mealplan, names, products, receipts, recipes, reports, stock, usage
 from .deps import Services
 from .setup import run_setup
 
@@ -325,6 +325,33 @@ async def home_stock(body: HomeStockIn, request: Request) -> dict[str, Any]:
     """The one-time 'add what's already at home' step: done (or skipped) hides it from the home screen."""
     svc_of(request).db.set_kv("home_stock_done", "1" if body.done else "0")
     return {"home_stock_done": body.done}
+
+
+# The open checklist / stock-take, kept on the server too: the phone's copy can be cleared by the browser
+LIST_KEY = "current_list"
+LIST_MAX = 1_000_000
+
+
+@router.get("/lists/current")
+async def current_list(request: Request) -> Any:
+    raw = svc_of(request).db.get_kv(LIST_KEY)
+    return json.loads(raw) if raw else None
+
+
+@router.put("/lists/current")
+async def save_current_list(request: Request) -> dict[str, Any]:
+    body = await request.body()
+    if len(body) > LIST_MAX:
+        raise HTTPException(413, "List too large")
+    data = json.loads(body or b"null")
+    svc_of(request).db.set_kv(LIST_KEY, json.dumps(data, ensure_ascii=False) if data else "")
+    return {"saved": bool(data)}
+
+
+@router.post("/products/english-names")
+async def english_names(request: Request) -> dict[str, Any]:
+    """Name products in English (the ones not done yet)."""
+    return await names.rename_to_english(svc_of(request))
 
 
 @router.post("/receipts/commit")
