@@ -91,7 +91,9 @@ belong to the item they name or the item just above: subtract them from that lin
 Skip deposits ('užstatas', 'Skardinė (depozitinė)', 'Depozitas/įmoka'), shopping bags ('maišas'),
 totals, VAT, loyalty card and payment lines. Pet food, cleaning and other non-food: is_food=false.
 Map lines to catalog products by product_id only when it is clearly the same product; when it only
-probably is (other wording, brand or size), give it as suggested_product_id instead."""
+probably is (other wording, brand or size), give it as suggested_product_id instead. Only ever suggest
+the same kind of food: never a different food that merely shares a word (wholegrain pasta is not oat
+flakes, tea with honey is not honey)."""
 
 
 async def import_photo(
@@ -131,6 +133,8 @@ async def import_photo(
             suggestion = line.suggested_product_id if line.suggested_product_id in known_ids else None
             suggestion = suggestion or similar_product(catalog, line.text, line.name_en)
         row["suggestion"] = await product_card(svc, suggestion) if suggestion else None
+        if line.unit in ("piece", "pack") and (pack := pack_from_text(line.text)):
+            row["pack_size"], row["pack_unit"] = pack
         if commit and line.is_food and row["product_id"]:
             row.update(await _add_line(svc, CommitLine(**row), parsed.store))
         results.append(row)
@@ -148,9 +152,77 @@ async def import_photo(
     }
 
 
+# Words that describe rather than name a food, or are store brands: sharing one means nothing
+GENERIC_WORDS = set(
+    [
+        "with",
+        "and",
+        "the",
+        "for",
+        "extra",
+        "line",
+        "mini",
+        "maxi",
+        "fresh",
+        "natural",
+        "classic",
+        "organic",
+        "bio",
+        "wholegrain",
+        "whole",
+        "grain",
+        "red",
+        "green",
+        "white",
+        "black",
+        "yellow",
+        "sweet",
+        "hot",
+        "light",
+        "dark",
+        "well",
+        "done",
+        "kaimo",
+        "sviezia",
+        "sviezias",
+        "sviezios",
+        "lietuviska",
+        "lietuviskas",
+        "su",
+        "ir",
+        "be",
+        "naturalus",
+        "ekologiskas",
+        "pilno",
+        "grudo",
+        "grudu",
+        "raudonoji",
+        "juodoji",
+        "balta",
+        "baltas",
+    ]
+)
+
+
 def _norm(text: str) -> list[str]:
     plain = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
-    return [w for w in re.findall(r"[a-z]{3,}", plain)]
+    return [w for w in re.findall(r"[a-z]{3,}", plain) if w not in GENERIC_WORDS]
+
+
+_PACK = re.compile(r"(?:(\d+)\s*[x×]\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|cl|l)\b", re.IGNORECASE)
+
+
+def pack_from_text(text: str) -> tuple[float, str] | None:
+    """The pack size printed in a receipt line: 'Fetos sūris 150g' -> 150 g, '12 x 10 g' -> 120 g."""
+    matches = list(_PACK.finditer(text))
+    if not matches:
+        return None
+    count, amount, unit = matches[-1].groups()
+    value = float(amount.replace(",", ".")) * (int(count) if count else 1)
+    unit = unit.lower()
+    base = "g" if unit in ("g", "kg") else "ml"
+    value = convert(value, unit, base)
+    return (round(value, 1), base) if value > 0 else None
 
 
 def similar_product(catalog: list[dict[str, Any]], *names: str) -> int | None:
@@ -163,7 +235,7 @@ def similar_product(catalog: list[dict[str, Any]], *names: str) -> int | None:
                 score = difflib.SequenceMatcher(None, w, pw).ratio()
                 if score > best_score:
                     best, best_score = product["id"], score
-    return best if best_score >= 0.8 else None
+    return best if best_score >= 0.85 else None
 
 
 async def inbox(svc: Services) -> dict[str, Any]:

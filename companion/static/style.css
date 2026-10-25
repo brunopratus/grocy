@@ -318,3 +318,5 @@ button.sname:focus-visible { outline: 2px solid var(--accent); outline-offset: 3
 .edit label.check { margin: .6rem 0 .2rem; }
 .edit .row button { margin-bottom: 0; }
 button.mini { white-space: nowrap; }
+details.plan-more { margin: .4rem 0 .8rem; }
+details.plan-more summary { cursor: pointer; color: var(--accent); font-size: .9rem; padding: .3rem 0; }

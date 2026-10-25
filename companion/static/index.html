@@ -193,25 +193,34 @@
   <!-- Week plan -->
   <section id="plan" class="panel" hidden>
     <form id="plan-form" class="card">
-      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></svg>Weekly plan (PDF / text / photo)<input name="file" type="file" accept=".pdf,.txt,.md,image/*"></label>
+      <p class="small muted">Add the week's meal plan you received. Grocy+ checks every meal against what's at home
+        and lists only what you still need to buy.</p>
+      <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></svg>Your meal plan (PDF / text / photo)<input name="file" type="file" accept=".pdf,.txt,.md,image/*"></label>
       <label>…or paste it<textarea name="text" rows="4"></textarea></label>
-      <div class="row">
-        <label>Week starts<input name="week_start" type="date"></label>
-        <label>kcal / person<input name="kcal_target" type="number" min="1000" max="5000" step="50" placeholder="2000"></label>
-      </div>
-      <div class="row">
-        <label>Budget € / week<input name="budget_eur" type="text" inputmode="decimal" pattern="\d+([.,]\d+)?" autocomplete="off"></label>
-        <label>People<input name="people" type="number" min="1" value="2"></label>
-      </div>
-      <label>Preferences<input name="preferences" placeholder="e.g. no pork, quick lunches"></label>
-      <label class="check"><input name="dry_run" type="checkbox" checked> Preview only (don't write to Grocy)</label>
-      <button type="submit">Generate plan</button>
+      <label>Week starts<input name="week_start" type="date"></label>
+      <label class="check"><input name="keep_recipes" type="checkbox" checked> Keep my plan as it is (only check it against the stock)</label>
+      <details class="plan-more">
+        <summary>Let Grocy+ adapt the plan (optional)</summary>
+        <p class="small muted">Untick "Keep my plan as it is" to let meals be swapped so that opened and soon-due food is used first.
+          These are only used then, and can stay empty.</p>
+        <div class="row">
+          <label>kcal / person<input name="kcal_target" type="number" min="1000" max="5000" step="50" placeholder="2000"></label>
+          <label>Budget € / week<input name="budget_eur" type="text" inputmode="decimal" pattern="\d+([.,]\d+)?" autocomplete="off"></label>
+        </div>
+        <div class="row">
+          <label>People<input name="people" type="number" min="1" value="2"></label>
+          <label>Preferences<input name="preferences" placeholder="e.g. no pork"></label>
+        </div>
+      </details>
+      <label class="check"><input name="dry_run" type="checkbox" checked> Preview only (don't add recipes and shopping list to Grocy yet)</label>
+      <button type="submit">Check the plan against my stock</button>
     </form>
     <div id="plan-result"></div>
   </section>
 
   <!-- Receipt -->
   <section id="receipt" class="panel" hidden>
+    <div id="open-lists" class="card" hidden></div>
     <div id="receipt-inbox" class="card"></div>
     <form id="receipt-form" class="card">
       <label class="file"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6"/></svg>Receipt: take a photo, or choose a photo or PDF<input name="image" type="file" accept="image/*,application/pdf" required></label>

@@ -24,7 +24,7 @@ async def test_products_renamed_in_english_and_found_by_original_name(settings, 
     assert receipts.similar_product(catalog_rows, "KIAUSINIAI L 10vnt") == 1
 
 
-def test_open_list_is_kept_on_the_server(settings, catalog, fake_grocy):
+def test_lists_are_shared_between_phones_without_losing_changes(settings, catalog, fake_grocy):
     from fastapi.testclient import TestClient
 
     from app.main import create_app
@@ -32,9 +32,19 @@ def test_open_list_is_kept_on_the_server(settings, catalog, fake_grocy):
     svc = make_services(settings, catalog, fake_grocy)
     auth = {"Authorization": "Bearer secret"}
     with TestClient(create_app(svc, start_background=False)) as client:
-        assert client.get("/lists/current", headers=auth).json() is None
-        stock_take = {"mode": "home", "lines": [{"text": "Kiaušiniai", "quantity": 10}]}
-        assert client.put("/lists/current", headers=auth, json=stock_take).json() == {"saved": True}
-        assert client.get("/lists/current", headers=auth).json() == stock_take
-        client.put("/lists/current", headers=auth, json=None)
-        assert client.get("/lists/current", headers=auth).json() is None
+        receipt = {"mode": "receipt", "store": "Maxima", "lines": [{"text": "Feta", "include": True}]}
+        r = client.put("/lists/abc123", headers=auth, json={"version": 0, "device": "Android", "data": receipt})
+        assert r.json()["version"] == 1
+        # the other phone sees it and opens it
+        listed = client.get("/lists", headers=auth).json()
+        assert [(x["id"], x["store"], x["open_lines"], x["device"]) for x in listed] == [
+            ("abc123", "Maxima", 1, "Android")
+        ]
+        assert client.get("/lists/abc123", headers=auth).json()["data"] == receipt
+        assert client.put("/lists/abc123", headers=auth, json={"version": 1, "data": receipt}).json()["version"] == 2
+        # a save based on an old version is refused with the newer list
+        stale = client.put("/lists/abc123", headers=auth, json={"version": 1, "data": {"lines": []}})
+        assert stale.status_code == 409 and stale.json()["detail"]["current"]["version"] == 2
+        client.delete("/lists/abc123", headers=auth)
+        assert client.get("/lists", headers=auth).json() == []
+        assert client.get("/lists/abc123", headers=auth).status_code == 404

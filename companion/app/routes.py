@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from . import alerts, bugs, mealplan, names, products, receipts, recipes, reports, stock, usage
+from . import alerts, bugs, lists, mealplan, names, products, receipts, recipes, reports, stock, usage
 from .deps import Services
 from .setup import run_setup
 
@@ -294,6 +294,7 @@ async def mealplan_generate(
     budget_eur: float | None = Form(None),
     dry_run: bool = Form(False),
     preferences: str | None = Form(None),
+    keep_recipes: bool = Form(True),
 ) -> dict[str, Any]:
     svc = svc_of(request)
     data, mt = (await _read(file)) if file is not None and file.filename else (None, None)
@@ -304,6 +305,7 @@ async def mealplan_generate(
         budget_eur=budget_eur,
         dry_run=dry_run,
         extra_preferences=preferences,
+        keep_recipes=keep_recipes,
     )
     return await mealplan.run(svc, req, data, mt, text)
 
@@ -347,25 +349,36 @@ async def home_stock(body: HomeStockIn, request: Request) -> dict[str, Any]:
     return {"home_stock_done": body.done}
 
 
-# The open checklist / stock-take, kept on the server too: the phone's copy can be cleared by the browser
-LIST_KEY = "current_list"
-LIST_MAX = 1_000_000
+# Open checklists, shared by the household's phones (see lists.py)
+@router.get("/lists")
+async def open_lists(request: Request) -> list[dict[str, Any]]:
+    return lists.all_lists(svc_of(request))
 
 
 @router.get("/lists/current")
-async def current_list(request: Request) -> Any:
-    raw = svc_of(request).db.get_kv(LIST_KEY)
-    return json.loads(raw) if raw else None
+async def current_list_legacy() -> None:
+    """Replaced by /lists: an app version still cached on a phone gets nothing to restore."""
+    return None
 
 
 @router.put("/lists/current")
-async def save_current_list(request: Request) -> dict[str, Any]:
-    body = await request.body()
-    if len(body) > LIST_MAX:
-        raise HTTPException(413, "List too large")
-    data = json.loads(body or b"null")
-    svc_of(request).db.set_kv(LIST_KEY, json.dumps(data, ensure_ascii=False) if data else "")
-    return {"saved": bool(data)}
+async def save_current_list_legacy() -> dict[str, Any]:
+    return {"saved": False}
+
+
+@router.get("/lists/{list_id}")
+async def get_list(list_id: str, request: Request) -> dict[str, Any]:
+    return lists.get(svc_of(request), list_id)
+
+
+@router.put("/lists/{list_id}")
+async def save_list(list_id: str, body: lists.ListSave, request: Request) -> dict[str, Any]:
+    return lists.save(svc_of(request), list_id, body)
+
+
+@router.delete("/lists/{list_id}")
+async def delete_list(list_id: str, request: Request) -> dict[str, Any]:
+    return lists.delete(svc_of(request), list_id)
 
 
 @router.post("/products/english-names")

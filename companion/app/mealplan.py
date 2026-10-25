@@ -98,6 +98,7 @@ class PlanRequest(BaseModel):
     budget_eur: float | None = Field(None, gt=0, description="Food budget for the week")
     dry_run: bool = False
     extra_preferences: str | None = None
+    keep_recipes: bool = Field(True, description="Keep the received plan's meals as they are; only check stock")
 
 
 SYSTEM = """You are the meal planner of a 2-person household in Kaunas, Lithuania (EUR, stores: Maxima, Rimi,
@@ -201,11 +202,18 @@ async def generate_plan(
         "budget_eur_week": req.budget_eur,
         "extra_preferences": req.extra_preferences,
     }
+    keep = (
+        "KEEP THE RECEIVED PLAN AS IT IS: same meals on the same days and slots, same recipes and amounts. "
+        "Do not swap or add recipes; rules 1-4 do not apply. Only map ingredients to catalog products and "
+        "give what is needed, so it can be checked against the stock.\n\n"
+        if req.keep_recipes
+        else ""
+    )
     content.append(
         {
             "type": "text",
             "text": (
-                f"Preferences: {compact_json(prefs)}\n\n"
+                f"{keep}Preferences: {compact_json(prefs)}\n\n"
                 f"Current stock (risk=true means opened or due within {RISK_DAYS} days):\n"
                 f"{compact_json(inv['stock'])}\n\n"
                 f"Product catalog for product_id mapping:\n{compact_json(inv['catalog'])}\n\n"

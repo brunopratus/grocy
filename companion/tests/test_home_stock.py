@@ -73,3 +73,16 @@ async def test_weight_of_a_product_kept_in_pieces_sets_its_pack_size(settings, c
     assert r["added"] == 1, r
     assert fake_grocy.uf[("products", 9)] == {"net_amount_per_pack": 1500, "net_unit": "g"}
     assert next(c for c in fake_grocy.calls if c[0] == "add_stock")[2] == 1  # one pack of 1.5 kg
+
+
+def test_pack_size_read_from_the_receipt_line():
+    assert receipts.pack_from_text("Fetos sūris WELL DONE 150g") == (150, "g")
+    assert receipts.pack_from_text("Daržovių sultinys MAGGI, 12 x 10 g") == (120, "g")
+    assert receipts.pack_from_text("Pienas 2,5% 1,5 l") == (1500, "ml")
+    assert receipts.pack_from_text("Kiaušiniai L, 10 vnt.") is None
+
+
+def test_suggestions_ignore_words_that_only_describe():
+    catalog = [{"id": 1, "name": "Wholegrain oat flakes (Malsena)"}, {"id": 2, "name": "Feta cheese"}]
+    assert receipts.similar_product(catalog, "Visų grūdo dalių makaronai", "wholegrain pasta") is None
+    assert receipts.similar_product(catalog, "Fetos sūris WELL DONE", "feta cheese") == 2

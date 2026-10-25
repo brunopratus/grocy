@@ -163,15 +163,17 @@ async function loadFirstStep() {
   const card = $("#first-step");
   card.hidden = lookups.home_stock_done !== false;
   if (card.hidden) return;
-  if (!lastReceipt) lastReceipt = await loadSavedList();
-  const going = lastReceipt?.mode === "home";
+  if (!lastReceipt) await loadSavedList();
+  let going = lastReceipt?.mode === "home";
+  if (!going) { try { going = (await api("/lists")).some((x) => x.mode === "home"); } catch { /* offline */ } }
   $("#first-step-go").textContent = going ? "Continue the stock-take" : "Start";
 }
 
 async function startHomeStock() {
   const saved = lastReceipt || await loadSavedList();
-  if (saved?.mode === "home") { lastReceipt = saved; return show("receipt"); }  // the receipt screen loads and draws the saved list
-  if (saved?.lines.some((l) => l.include && !l.done) && !confirm("A shopping checklist is still open. Replace it with the stock-take?")) return;
+  if (saved?.mode === "home") return show("receipt");  // the receipt screen loads and draws the saved list
+  const other = (await api("/lists")).find((x) => x.mode === "home");  // started on another phone
+  if (other) return openList(other.id);
   startList("home");
 }
 
@@ -375,7 +377,7 @@ function chipsHtml(l) {
   const counted = COUNT_UNITS.includes(l.unit);
   if (!l.product) {
     // Not in Grocy yet: nothing is known about it
-    return [chip(false, "In Grocy"), chip(false, "Nutrition"), counted ? chip(false, "Weight") : chip(true, "Weight")].join("");
+    return [chip(false, "In Grocy"), chip(false, "Nutrition"), counted && !l.pack_size ? chip(false, "Weight") : chip(true, "Weight")].join("");
   }
   const weight = !counted || l.pack_size ? chip(true, "Weight") : needsPack(l) ? chip(false, "Weight") : chip(false, "Weight", true);
   return [
@@ -454,7 +456,8 @@ const MODE_TITLES = { receipt: "Finish shopping", manual: "Finish shopping", hom
 
 // A list without a receipt: "manual" (receipt won't read / no receipt) or "home" (one-time stock-take)
 function startList(mode) {
-  lastReceipt = { mode, store: null, date: new Date().toLocaleDateString("sv-SE"), total_eur: null, lines: [], location: "Fridge" };
+  if (listTimer) pushList();  // the list open before stays on the server, under "Open lists"
+  lastReceipt = { id: newListId(), version: 0, mode, store: null, date: new Date().toLocaleDateString("sv-SE"), total_eur: null, lines: [], location: "Fridge" };
   renderReceipt();
   show("receipt");
 }
@@ -569,39 +572,133 @@ function hintText(l) {
   return "";
 }
 
-// The checklist survives closing the app (iPhone may also reload the page after using the camera)
-function saveReceipt() {
+// The checklist survives closing the app (iPhone may also reload the page after using the camera), and is
+// shared with the household's other phones through the server (each list has an id and a version).
+const DEVICE = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Android/.test(navigator.userAgent) ? "Android phone" : "computer";
+const newListId = () => (crypto.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, "").slice(0, 24);
+
+function storeLocal() {
   try {
-    if (lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
+    if (lastReceipt) localStorage.setItem("gp-receipt", JSON.stringify(lastReceipt));
     else localStorage.removeItem("gp-receipt");
   } catch { /* storage blocked: the server copy still has it */ }
-  syncReceiptForm();
-  clearTimeout(listTimer);
-  listTimer = setTimeout(pushList, 1200);
 }
 
-// A copy of the open list on the server: the phone's storage can be cleared (iPhone does that to
-// sites not opened for a while), and a stock-take done in parts must survive that.
-let listTimer = null;
-function pushList() {
+function saveReceipt() {
+  if (lastReceipt && !lastReceipt.id) lastReceipt.id = newListId();
+  storeLocal();
+  syncReceiptForm();
   clearTimeout(listTimer);
-  const keep = lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt");
-  fetch("/lists/current", {
-    method: "PUT", credentials: "same-origin", keepalive: true,
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify(keep ? lastReceipt : null),
-  }).catch(() => { /* offline: the phone's copy is still there; sent with the next change */ });
+  if (lastReceipt) listTimer = setTimeout(pushList, 1000);
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden && listTimer) pushList(); });
+
+let listTimer = null, pushing = false, pushAgain = false;
+async function pushList() {
+  clearTimeout(listTimer);
+  listTimer = null;
+  const r = lastReceipt;
+  if (!r) return;
+  if (pushing) { pushAgain = true; return; }
+  pushing = true;
+  try {
+    const body = JSON.stringify({ version: r.version || 0, device: DEVICE, data: r });
+    const res = await fetch(`/lists/${r.id}`, {
+      method: "PUT", credentials: "same-origin", keepalive: body.length < 60000,
+      headers: { "Content-Type": "application/json" }, body,
+    });
+    if (res.status === 409) {
+      // Another phone saved this list in between: show theirs (the newer one)
+      const cur = (await res.json()).detail.current;
+      if (lastReceipt?.id === cur.id) { takeServerList(cur); toast("This list was changed on another phone: showing the latest", 6000); }
+    } else if (res.ok) {
+      const j = await res.json();
+      if (lastReceipt?.id === r.id) { lastReceipt.version = j.version; storeLocal(); }
+    }
+  } catch { /* offline: kept on the phone and sent with the next change */ } finally {
+    pushing = false;
+    if (pushAgain) { pushAgain = false; pushList(); }
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && listTimer) pushList();
+  if (!document.hidden && currentPanel === "receipt") refreshFromServer();
+});
+
+function takeServerList(row) {
+  lastReceipt = { ...row.data, id: row.id, version: row.version };
+  lastReceipt.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });
+  storeLocal();
+  if (currentPanel === "receipt") { renderReceipt(); show("receipt"); }
+}
+
+// Another phone may have worked on the open list: take its newer version
+async function refreshFromServer() {
+  const r = lastReceipt;
+  if (!r?.id || !r.version || listTimer || pushing) return;
+  try {
+    const row = await api(`/lists/${r.id}`);
+    if (row.version > r.version && lastReceipt?.id === row.id) takeServerList(row);
+  } catch (err) {
+    if (/finished or was discarded/.test(err.message) && lastReceipt?.id === r.id) {
+      lastReceipt = null;
+      storeLocal();
+      $("#receipt-result").innerHTML = "";
+      syncReceiptForm();
+      toast("That list was finished on another phone", 5000);
+    }
+  }
+}
 
 async function loadSavedList() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem("gp-receipt") || "null"); } catch { /* blocked */ }
-  if (!saved) {
-    try { saved = await api("/lists/current"); } catch { /* offline */ }
-    if (saved) toast("Your open list was restored from the server", 5000);
-  }
-  saved?.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
-  return saved;
+  if (!saved) return null;
+  saved.lines.forEach((l) => { if (l.shelf === "asking") l.shelf = null; });  // app closed mid-request
+  lastReceipt = saved;
+  if (saved.version) await refreshFromServer();
+  else saveReceipt();  // never sent (or from before lists were shared): send it now
+  return lastReceipt;
+}
+
+// The list is finished or discarded: gone from every phone
+function closeList() {
+  const id = lastReceipt?.id;
+  lastReceipt = null;
+  clearTimeout(listTimer);
+  listTimer = null;
+  storeLocal();
+  if (id) fetch(`/lists/${id}`, { method: "DELETE", credentials: "same-origin" }).catch(() => {});
+}
+
+function listTitle(x) {
+  if (x.mode === "home") return "Stock-take at home";
+  if (x.mode === "manual") return `Without a receipt${x.store ? ` · ${x.store}` : ""}`;
+  return `${x.store || "Receipt"}${x.date ? ` ${x.date}` : ""}`;
+}
+
+function ago(iso) {
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : iso.slice(0, 10);
+}
+
+// Lists open on the household's phones, to pick up on this one
+async function loadOpenLists() {
+  const box = $("#open-lists");
+  let rows = [];
+  try { rows = (await api("/lists")).filter((x) => x.id !== lastReceipt?.id); } catch { /* offline */ }
+  box.hidden = !rows.length;
+  box.innerHTML = `<h2>Open lists</h2>` + list(rows.map((x) => `<div class="sitem"><span><strong>${esc(listTitle(x))}</strong><br>
+    <span class="small muted">${x.open_lines} to add · ${esc(x.device || "a phone")}, ${ago(x.updated)}</span></span>
+    <button type="button" class="secondary mini" data-list="${esc(x.id)}">Open</button></div>`));
+  return rows;
+}
+
+async function openList(id) {
+  if (listTimer) await pushList();  // this phone's changes first
+  takeServerList(await api(`/lists/${id}`, { busy: "Opening…" }));
+  renderReceipt();
+  show("receipt");
+  loadOpenLists();
 }
 
 // The receipt photo form only belongs to "Finish shopping" with a receipt (or nothing started yet)
@@ -613,7 +710,9 @@ function syncReceiptForm() {
 }
 
 async function openFinishShopping() {
-  if (!lastReceipt) lastReceipt = await loadSavedList();
+  if (!lastReceipt) await loadSavedList();
+  else await refreshFromServer();
+  loadOpenLists();
   // Draw a saved list that isn't on screen yet (e.g. opened from "Continue the stock-take" after a reload)
   if ((lastReceipt?.lines.length || (lastReceipt && lastReceipt.mode !== "receipt")) && !$("#receipt-result").children.length) {
     renderReceipt();
@@ -646,7 +745,9 @@ async function assignToLine(card) {
   let l = lastReceipt.lines[receiptCtx];
   if (receiptCtx === -1) { l = newLine(card); lastReceipt.lines.push(l); }  // "Add an item" by scanning
   receiptCtx = null;
-  const same = l.product_id === card.id;  // e.g. after the label photo: keep the amount and pack size typed
+  // Same product (e.g. after the label photo), or a line not linked yet (pack size read from the receipt):
+  // keep the amount and pack size
+  const same = l.product_id === card.id || l.product_id == null;
   Object.assign(l, { product_id: card.id, product: card, include: true, shelf: null, ...(same ? {} : { pack_size: null }) });
   await refreshLookups();
   renderReceipt();
@@ -671,8 +772,7 @@ async function finishHomeStock() {
   if (open && !confirm(`${open} item(s) on the list aren't added yet. Finish anyway?`)) return;
   await api("/setup/home-stock", { method: "POST", json: { done: true } });
   lookups.home_stock_done = true;
-  lastReceipt = null;
-  saveReceipt();
+  closeList();
   $("#receipt-result").innerHTML = "";
   toast("First step done: your stock is in Grocy", 5000);
   show("home");
@@ -699,7 +799,7 @@ async function commitReceipt() {
     // The home stock-take continues (next shelf) until "I'm done"
     renderReceipt();
     $("#receipt-result").insertAdjacentHTML("afterbegin", doneHtml);
-  } else { $("#receipt-result").innerHTML = doneHtml; saveReceipt(); }
+  } else { $("#receipt-result").innerHTML = doneHtml; closeList(); syncReceiptForm(); }
 }
 
 function wireReceipt() {
@@ -753,9 +853,7 @@ function wireReceipt() {
       if (b.id === "receipt-commit") return await commitReceipt();
       if (b.id === "receipt-discard") {
         if (!confirm("Discard this list? Nothing more is added to stock.")) return;
-        lastReceipt = null;
-        saveReceipt();
-        try { localStorage.removeItem("gp-receipt"); } catch { /* ignore */ }
+        closeList();
         $("#receipt-result").innerHTML = "";
         syncReceiptForm();
         show(currentPanel);  // title back to "Finish shopping"
@@ -1059,6 +1157,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("#ctx-back").addEventListener("click", () => show("receipt"));
   wireReceipt();
+  $("#open-lists").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-list]");
+    if (b) openList(b.dataset.list).catch((err) => toast(err.message, 6000));
+  });
   on("#credit-form", "submit", async (e) => {
     await api("/usage/credit", { method: "POST", json: { balance_usd: num(e.target.balance_usd.value) } });
     e.target.reset();
@@ -1229,7 +1331,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     if (!r.lines?.length) r.lines = [];
-    lastReceipt = { mode: "receipt", ...r };
+    if (listTimer) pushList();  // the list open before stays on the server, under "Open lists"
+    lastReceipt = { id: newListId(), version: 0, mode: "receipt", ...r };
     renderReceipt();
     e.target.reset();
   });
@@ -1293,8 +1396,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     for (const k of ["text", "week_start", "kcal_target", "budget_eur", "people", "preferences"]) {
       if (f[k].value) fd.append(k, k === "budget_eur" ? String(num(f[k].value)) : f[k].value);
     }
+    if (!f.file.files[0] && !f.text.value.trim()) return toast("Add the meal plan: a file, a photo or the text");
     fd.append("dry_run", f.dry_run.checked ? "true" : "false");
-    const r = await api("/mealplan/generate", { method: "POST", form: fd, busy: "Planning the week… (up to a few minutes)" });
+    fd.append("keep_recipes", f.keep_recipes.checked ? "true" : "false");
+    const r = await api("/mealplan/generate", { method: "POST", form: fd, busy: "Checking the plan against your stock… (up to a few minutes)" });
     const s = r.summary;
     let html = `<div class="card"><h2>Week of ${esc(s.week_start)} ${r.dry_run ? '<span class="badge">preview</span>' : '<span class="badge good">written to Grocy</span>'}</h2>
       <p>Estimated cost: <strong>${eur(s.week_cost_eur)}</strong></p>`;
